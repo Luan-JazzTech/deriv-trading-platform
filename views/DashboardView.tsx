@@ -2,12 +2,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, AlertTriangle, ArrowRight, Zap, Clock } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, CheckCircle2, XCircle, AlertTriangle, PlayCircle, Zap, Clock, ShieldAlert } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 
 export function DashboardView() {
-  const [balance] = useState(1240.50);
+  const [balance, setBalance] = useState(1240.50);
   const [symbol] = useState("Volatility 100 (1s)");
   const [stake, setStake] = useState(10);
   const [duration, setDuration] = useState(5);
@@ -18,36 +18,53 @@ export function DashboardView() {
   const [currentPrice, setCurrentPrice] = useState(1050.00);
   const [candles, setCandles] = useState<Candle[]>([]);
 
-  // Ref para controlar o tempo de criação do último candle sem causar re-render
+  // --- GERENCIAMENTO DE RISCO SNIPER ---
+  const [dailyStats, setDailyStats] = useState({
+      trades: 0,
+      wins: 0,
+      losses: 0,
+      profit: 0
+  });
+  
+  // Configurações do Robô Sniper
+  const RISK_CONFIG = {
+      maxTrades: 3,         // Limite de 3 tiros
+      stopWin: 50.00,       // Meta de lucro
+      stopLoss: -30.00      // Limite de perda
+  };
+
+  const isMarketLocked = 
+      dailyStats.trades >= RISK_CONFIG.maxTrades || 
+      dailyStats.profit >= RISK_CONFIG.stopWin || 
+      dailyStats.profit <= RISK_CONFIG.stopLoss;
+
+  // Ref para controlar o tempo
   const lastCandleCreationRef = useRef<number>(Date.now());
 
-  // Simulação de Mercado (Gerador de Candles Fake)
+  // Simulação de Mercado
   useEffect(() => {
-    // Resetar estado ao mudar timeframe
     setCandles([]);
     lastCandleCreationRef.current = Date.now();
     
-    // Configuração de Tempo REAL
+    // M1 = 60s, M5 = 300s...
     const candleDuration = timeframe === 'M1' ? 60000 : timeframe === 'M5' ? 300000 : 900000;
     
-    // Inicializa com histórico
+    // Inicializar histórico
     const initialCandles: Candle[] = [];
     let price = 1050.00;
     const now = Date.now();
     const volatilityMultiplier = timeframe === 'M1' ? 1 : timeframe === 'M5' ? 2.5 : 5;
 
-    for (let i = 30; i > 0; i--) {
+    for (let i = 60; i > 0; i--) {
       const open = price;
       const move = (Math.random() - 0.5) * 5 * volatilityMultiplier;
       const close = price + move;
-      const high = Math.max(open, close) + Math.random() * 2;
-      const low = Math.min(open, close) - Math.random() * 2;
       
       initialCandles.push({
         time: now - (i * candleDuration),
         open,
-        high,
-        low,
+        high: Math.max(open, close) + Math.random(),
+        low: Math.min(open, close) - Math.random(),
         close
       });
       price = close;
@@ -55,24 +72,20 @@ export function DashboardView() {
     setCandles(initialCandles);
     setCurrentPrice(price);
 
-    // Loop de atualização (Tick Rate de 1s)
     const interval = setInterval(() => {
       const currentTime = Date.now();
       const timeSinceLastCandle = currentTime - lastCandleCreationRef.current;
       const shouldCreateNewCandle = timeSinceLastCandle >= candleDuration;
 
-      // Volatilidade do tick
-      const tickVolatility = timeframe === 'M1' ? 0.5 : timeframe === 'M5' ? 1.5 : 3;
+      const tickVolatility = timeframe === 'M1' ? 0.8 : 2;
       const change = (Math.random() - 0.5) * tickVolatility;
 
       setCandles(prev => {
         if (prev.length === 0) return prev;
-        
         const last = prev[prev.length - 1];
         let newHistory = [...prev];
 
         if (shouldCreateNewCandle) {
-            // FECHAR VELA ATUAL E ABRIR UMA NOVA
             const newCandle: Candle = {
                 time: currentTime,
                 open: last.close, 
@@ -82,10 +95,8 @@ export function DashboardView() {
             };
             newHistory = [...prev.slice(1), newCandle]; 
             lastCandleCreationRef.current = currentTime;
-            
             setCurrentPrice(newCandle.close);
         } else {
-            // ATUALIZAR VELA EXISTENTE
             const newClose = last.close + change;
             const updatedLast = { 
                 ...last, 
@@ -97,110 +108,79 @@ export function DashboardView() {
             setCurrentPrice(newClose);
         }
 
-        // Rodar análise técnica
-        // A Engine agora é estável (analisa o passado confirmado)
-        // então rodar a cada tick não causa "flicker" de sinal, apenas atualiza valores menores.
         const result = analyzeMarket(newHistory);
         setAnalysis(result);
-
         return newHistory;
       });
-
     }, 1000); 
 
     return () => clearInterval(interval);
   }, [timeframe]);
 
+  const handleTrade = (type: 'CALL' | 'PUT') => {
+      if (isMarketLocked) return;
+
+      // SIMULAÇÃO DE RESULTADO (Apenas para testar o Stop Win/Loss)
+      const isWin = Math.random() > 0.4; // 60% chance de win simulado
+      const profit = isWin ? stake * 0.95 : -stake;
+
+      const newStats = {
+          trades: dailyStats.trades + 1,
+          wins: isWin ? dailyStats.wins + 1 : dailyStats.wins,
+          losses: !isWin ? dailyStats.losses + 1 : dailyStats.losses,
+          profit: dailyStats.profit + profit
+      };
+
+      setDailyStats(newStats);
+      setBalance(prev => prev + profit);
+
+      // Feedback visual
+      const msg = isWin ? `WIN! +${formatCurrency(stake * 0.95)}` : `LOSS! -${formatCurrency(stake)}`;
+      alert(`Ordem ${type} Finalizada (Simulação)\nResultado: ${msg}`);
+  };
+
   const getDirectionColor = (dir: string) => {
     if (dir === 'CALL') return 'text-green-600';
     if (dir === 'PUT') return 'text-red-600';
-    return 'text-slate-500';
+    return 'text-slate-400';
   };
   
   const getProbabilityColor = (prob: number) => {
-    if (prob >= 80) return 'bg-green-500 text-white';
-    if (prob >= 60) return 'bg-blue-500 text-white';
-    return 'bg-slate-200 text-slate-600';
+    if (prob >= 80) return 'bg-green-600 text-white';
+    if (prob >= 70) return 'bg-blue-600 text-white';
+    return 'bg-slate-200 text-slate-500';
   };
 
-  // Renderização do Gráfico
+  // SVG Chart rendering (mesmo código anterior, simplificado aqui)
   const renderChart = () => {
     if (candles.length === 0) return null;
-    
-    // 1. Encontrar Min e Max da tela atual para escala
     const minPrice = Math.min(...candles.map(c => c.low));
     const maxPrice = Math.max(...candles.map(c => c.high));
-    const priceRange = maxPrice - minPrice || 1; // Evitar divisão por zero
-    
-    // Dimensões
-    const width = 800; // Unidades SVG arbitrárias
-    const height = 300;
-    const padding = 40; // Mais espaço para não cortar pavio
-    const usableHeight = height - (padding * 2);
-    
-    // Largura da vela baseada na quantidade (zoom fit)
+    const priceRange = maxPrice - minPrice || 1;
+    const width = 800; const height = 300; const padding = 40; const usableHeight = height - (padding * 2);
     const candleWidth = (width / candles.length) * 0.6;
     const spacing = (width / candles.length);
 
     return (
       <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} className="overflow-visible preserve-3d">
-        {/* Linha de Grade Central */}
         <line x1="0" y1={height/2} x2={width} y2={height/2} stroke="#f1f5f9" strokeDasharray="4" />
-        
         {candles.map((candle, index) => {
-          // Normalização Y: (Valor - Min) / Range -> 0 a 1 -> Multiplica por Altura -> Inverte (SVG Y é pra baixo)
           const normalizeY = (val: number) => height - padding - ((val - minPrice) / priceRange) * usableHeight;
-          
-          const yOpen = normalizeY(candle.open);
-          const yClose = normalizeY(candle.close);
-          const yHigh = normalizeY(candle.high);
-          const yLow = normalizeY(candle.low);
-          
+          const yOpen = normalizeY(candle.open); const yClose = normalizeY(candle.close);
+          const yHigh = normalizeY(candle.high); const yLow = normalizeY(candle.low);
           const isGreen = candle.close >= candle.open;
-          const color = isGreen ? '#10b981' : '#ef4444'; // Tailwind Green-500 / Red-500
+          const color = isGreen ? '#10b981' : '#ef4444';
           const x = index * spacing + (spacing - candleWidth) / 2;
-          
-          // Altura mínima visual de 1px para dojis
           const bodyHeight = Math.max(1, Math.abs(yClose - yOpen));
           
           return (
-            <g key={candle.time} className="hover:opacity-80 transition-opacity cursor-crosshair">
-              {/* Pavio (Linha Vertical) */}
+            <g key={candle.time}>
               <line x1={x + candleWidth/2} y1={yHigh} x2={x + candleWidth/2} y2={yLow} stroke={color} strokeWidth="1.5" />
-              
-              {/* Corpo (Retângulo) */}
-              <rect 
-                x={x} 
-                y={Math.min(yOpen, yClose)} 
-                width={candleWidth} 
-                height={bodyHeight} 
-                fill={color} 
-                rx="1" // Leve arredondamento
-              />
+              <rect x={x} y={Math.min(yOpen, yClose)} width={candleWidth} height={bodyHeight} fill={color} rx="1" />
             </g>
           );
         })}
-        
-        {/* Linha de Preço Atual (Pontilhada Azul) */}
-        <line 
-          x1="0" 
-          y1={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} 
-          x2={width} 
-          y2={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} 
-          stroke="#3b82f6" 
-          strokeWidth="1" 
-          strokeDasharray="4" 
-        />
-        <text 
-            x={width - 5} 
-            y={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight - 5} 
-            textAnchor="end" 
-            fill="#3b82f6" 
-            fontSize="12" 
-            fontWeight="bold"
-        >
-            {currentPrice.toFixed(2)}
-        </text>
+        <line x1="0" y1={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} x2={width} y2={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} stroke="#3b82f6" strokeWidth="1" strokeDasharray="4" />
       </svg>
     );
   };
@@ -211,64 +191,82 @@ export function DashboardView() {
         <div>
           <h2 className="text-3xl font-bold tracking-tight text-slate-900">{symbol}</h2>
           <div className="flex items-center gap-2 text-slate-500 mt-1">
-            <span className={`flex items-center ${analysis?.direction !== 'NEUTRO' ? 'text-green-600' : 'text-slate-500'}`}>
-              <Activity className="h-4 w-4 mr-1" />
-              Mercado em tempo real
-            </span>
-            <span className="text-xs px-2 py-0.5 bg-slate-100 rounded text-slate-500">
-                Tick: 1s
+            <span className="flex items-center text-green-600 text-xs font-bold uppercase tracking-wider bg-green-100 px-2 py-0.5 rounded">
+              Modo Sniper Ativo
             </span>
           </div>
         </div>
-        <Card className="w-48 bg-slate-900 text-white border-slate-800">
-          <CardContent className="p-4">
-            <p className="text-xs text-slate-400 font-medium uppercase">Saldo Atual</p>
-            <p className="text-2xl font-bold text-green-400">{formatCurrency(balance)}</p>
-          </CardContent>
-        </Card>
+        
+        {/* Painel de Metas Diárias */}
+        <div className="flex gap-4">
+             <Card className="bg-slate-900 text-white border-slate-800 w-40">
+                <CardContent className="p-3 text-center">
+                    <p className="text-[10px] text-slate-400 uppercase font-bold">Meta Diária</p>
+                    <div className="flex justify-center items-baseline gap-1">
+                        <span className={dailyStats.profit >= 0 ? "text-green-400 font-bold" : "text-red-400 font-bold"}>
+                            {formatCurrency(dailyStats.profit)}
+                        </span>
+                        <span className="text-[10px] text-slate-500">/ {formatCurrency(RISK_CONFIG.stopWin)}</span>
+                    </div>
+                    {/* Barra de Progresso */}
+                    <div className="w-full bg-slate-800 h-1 mt-1 rounded-full overflow-hidden">
+                        <div 
+                            className="bg-green-500 h-full transition-all duration-500" 
+                            style={{ width: `${Math.min((dailyStats.profit / RISK_CONFIG.stopWin) * 100, 100)}%` }}
+                        />
+                    </div>
+                </CardContent>
+             </Card>
+
+             <Card className="bg-white border-slate-200 w-32">
+                <CardContent className="p-3 text-center">
+                    <p className="text-[10px] text-slate-500 uppercase font-bold">Trades</p>
+                    <p className={`font-bold ${dailyStats.trades >= RISK_CONFIG.maxTrades ? 'text-red-600' : 'text-slate-900'}`}>
+                        {dailyStats.trades} <span className="text-slate-400 text-xs">/ {RISK_CONFIG.maxTrades}</span>
+                    </p>
+                </CardContent>
+             </Card>
+        </div>
       </div>
 
+      {isMarketLocked && (
+          <div className="bg-slate-900 text-white p-4 rounded-lg flex items-center justify-between border-l-4 border-red-500 shadow-lg">
+              <div className="flex items-center gap-3">
+                  <ShieldAlert className="h-6 w-6 text-red-500" />
+                  <div>
+                      <h4 className="font-bold">Gerenciamento de Risco Ativado</h4>
+                      <p className="text-sm text-slate-300">Você atingiu seu limite diário (Trades, Stop Win ou Stop Loss). Volte amanhã.</p>
+                  </div>
+              </div>
+              <Button variant="secondary" size="sm" onClick={() => window.location.reload()}>Reiniciar Demo</Button>
+          </div>
+      )}
+
       <div className="grid grid-cols-12 gap-6">
-        {/* Coluna Esquerda: Gráfico + Análise */}
         <div className="col-span-12 lg:col-span-8 space-y-4">
-          
-          {/* Gráfico */}
           <Card className="h-[400px] flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between pb-2 border-b">
-              <CardTitle className="text-sm font-medium text-slate-500">Gráfico de Preço (Simulação)</CardTitle>
+              <CardTitle className="text-sm font-medium text-slate-500">Gráfico em Tempo Real</CardTitle>
               <div className="flex gap-2">
                 {['M1', 'M5', 'M15'].map((tf) => (
-                  <button
-                    key={tf}
-                    onClick={() => setTimeframe(tf)}
-                    className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${
-                      timeframe === tf ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {tf}
-                  </button>
+                  <button key={tf} onClick={() => setTimeframe(tf)} className={`px-3 py-1 text-xs font-bold rounded-md ${timeframe === tf ? 'bg-slate-900 text-white' : 'bg-slate-100'}`}>{tf}</button>
                 ))}
               </div>
             </CardHeader>
-            <CardContent className="flex-1 p-4">
-              {renderChart()}
-            </CardContent>
+            <CardContent className="flex-1 p-4">{renderChart()}</CardContent>
           </Card>
 
-           {/* Módulo de Análise com Probabilidade */}
-           <Card className={`border-l-4 min-h-[180px] transition-colors ${
-             analysis?.direction === 'CALL' ? 'border-l-green-500' : 
-             analysis?.direction === 'PUT' ? 'border-l-red-500' : 'border-l-slate-300'
-           }`}>
+          {/* Análise Sniper */}
+          <Card className={`border-l-4 min-h-[180px] transition-colors ${analysis?.isSniperReady ? (analysis.direction === 'CALL' ? 'border-l-green-500' : 'border-l-red-500') : 'border-l-slate-200'}`}>
             <CardHeader className="pb-2">
               <div className="flex justify-between items-start">
                   <CardTitle className="flex items-center gap-2 text-lg">
-                    <Zap className="h-5 w-5 text-yellow-500" />
-                    Sinal da Inteligência Artificial
+                    <Zap className={`h-5 w-5 ${analysis?.isSniperReady ? 'text-yellow-500' : 'text-slate-300'}`} />
+                    Análise Sniper IA
                   </CardTitle>
                   <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded">
                       <Clock className="h-3 w-3" />
-                      <span>Entrada: <strong>Vela Atual</strong> (Baseado em fechamento anterior)</span>
+                      <span>Sinal para: <strong>Próxima Vela</strong></span>
                   </div>
               </div>
             </CardHeader>
@@ -277,129 +275,92 @@ export function DashboardView() {
                 <div className="flex items-start justify-between">
                   <div className="space-y-4">
                     <div>
-                      <p className="text-sm text-slate-500 mb-1 font-semibold uppercase tracking-wider">Recomendação</p>
+                      <p className="text-xs text-slate-500 mb-1 font-bold uppercase tracking-wider">Direção Confirmada</p>
                       <div className="flex items-center gap-2">
                         {analysis.direction === 'CALL' && <TrendingUp className="h-8 w-8 text-green-600" />}
                         {analysis.direction === 'PUT' && <TrendingDown className="h-8 w-8 text-red-600" />}
-                        {analysis.direction === 'NEUTRO' && <Activity className="h-8 w-8 text-slate-400" />}
+                        {analysis.direction === 'NEUTRO' && <Lock className="h-8 w-8 text-slate-300" />}
                         <span className={`text-4xl font-black tracking-tighter ${getDirectionColor(analysis.direction)}`}>
                           {analysis.direction}
                         </span>
                       </div>
                     </div>
                     
-                    {/* Badge de Probabilidade */}
-                    <div>
-                      <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-bold shadow-sm ${getProbabilityColor(analysis.probability)}`}>
-                        {analysis.probability}% Probabilidade de Win
-                      </div>
+                    <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-bold shadow-sm ${getProbabilityColor(analysis.probability)}`}>
+                        {analysis.probability}% Probabilidade
                     </div>
                   </div>
 
-                  {/* Lista de Fatores */}
                   <div className="flex-1 ml-12 border-l pl-6 space-y-2 max-h-[140px] overflow-y-auto">
                     <div className="flex justify-between items-center mb-2">
-                        <p className="text-xs font-semibold text-slate-400 uppercase">Fatores Técnicos</p>
-                        <span className="text-xs font-mono text-slate-400">Score: {analysis.score}</span>
+                        <p className="text-xs font-semibold text-slate-400 uppercase">Filtros de Entrada</p>
                     </div>
                     {analysis.factors.map((factor, idx) => (
                       <div key={idx} className="flex items-center gap-2 text-sm">
-                        <div className={`w-2 h-2 rounded-full ${
-                          factor.status === 'POSITIVE' ? 'bg-green-500' : 
-                          factor.status === 'NEGATIVE' ? 'bg-red-500' : 'bg-slate-300'
-                        }`} />
+                        <div className={`w-2 h-2 rounded-full ${factor.status === 'POSITIVE' ? 'bg-green-500' : factor.status === 'NEGATIVE' ? 'bg-red-500' : 'bg-slate-300'}`} />
                         <span className="text-slate-700 font-medium">{factor.label}</span>
                       </div>
                     ))}
-                    {analysis.factors.length === 0 && (
-                      <p className="text-sm text-slate-400 italic">Aguardando confirmação de padrão...</p>
+                    {!analysis.isSniperReady && (
+                        <p className="text-xs text-orange-500 font-medium mt-2 bg-orange-50 p-2 rounded border border-orange-100">
+                            ⚠️ Aguardando oportunidade de alta probabilidade...
+                        </p>
                     )}
                   </div>
                 </div>
-              ) : (
-                <div className="flex items-center justify-center h-32 text-slate-400 animate-pulse">
-                  Calculando confluências...
-                </div>
-              )}
+              ) : <div className="animate-pulse text-slate-400">Analisando mercado...</div>}
             </CardContent>
           </Card>
         </div>
 
-        {/* Coluna Direita: Execução */}
         <div className="col-span-12 lg:col-span-4 space-y-4">
-          <Card className="bg-white shadow-lg border-slate-200 h-full flex flex-col">
+          <Card className="bg-white shadow-lg border-slate-200 h-full flex flex-col relative overflow-hidden">
+            {isMarketLocked && <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px] z-50 flex items-center justify-center text-white font-bold text-lg cursor-not-allowed">Painel Bloqueado</div>}
+            
             <CardHeader className="bg-slate-50 border-b">
               <CardTitle className="text-base flex items-center gap-2">
                 <DollarSign className="h-5 w-5 text-green-600" />
-                Execução de Ordem
+                Painel de Execução
               </CardTitle>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col justify-between pt-6">
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-600">Valor da Entrada ($)</label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[10, 20, 50, 100].map(val => (
-                      <button 
-                        key={val}
-                        onClick={() => setStake(val)}
-                        className={`py-2 text-xs font-bold rounded border ${
-                          stake === val ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
-                        }`}
-                      >
-                        ${val}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="relative mt-2">
+                  <label className="text-sm font-medium text-slate-600">Entrada Fixa</label>
+                  <div className="relative">
                     <DollarSign className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <input 
-                      type="number" 
-                      value={stake}
-                      onChange={(e) => setStake(Number(e.target.value))}
-                      className="w-full pl-9 h-10 rounded-md border border-slate-300 focus:ring-2 focus:ring-slate-900 focus:outline-none font-mono font-bold text-lg"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-600">Duração (Ticks)</label>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => setDuration(Math.max(1, duration - 1))} className="h-10 w-10 flex items-center justify-center rounded-md border border-slate-300 hover:bg-slate-100">-</button>
-                    <div className="flex-1 h-10 flex items-center justify-center font-bold text-lg border border-slate-200 rounded-md bg-slate-50">
-                        {duration} <span className="text-xs font-normal text-slate-400 ml-1">ticks</span>
-                    </div>
-                    <button onClick={() => setDuration(duration + 1)} className="h-10 w-10 flex items-center justify-center rounded-md border border-slate-300 hover:bg-slate-100">+</button>
+                    <input type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} className="w-full pl-9 h-10 rounded-md border border-slate-300 font-mono font-bold text-lg" />
                   </div>
                 </div>
 
                 <div className="bg-green-50 p-4 rounded-lg border border-green-100">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs text-green-700 font-semibold uppercase">Payout Estimado</span>
-                    <span className="text-xs text-green-700 font-bold bg-green-200 px-2 py-0.5 rounded-full">95%</span>
-                  </div>
-                  <div className="text-2xl font-black text-green-800">+{formatCurrency(stake * 0.95)}</div>
+                    <div className="flex justify-between">
+                        <span className="text-xs text-green-700 font-bold uppercase">Payout</span>
+                        <span className="text-xs font-bold text-green-700">95%</span>
+                    </div>
+                    <div className="text-2xl font-black text-green-800">+{formatCurrency(stake * 0.95)}</div>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3 mt-8">
                 <Button 
                     variant="success" 
-                    className="h-16 text-lg font-bold flex flex-col leading-tight"
-                    onClick={() => alert(`Ordem CALL enviada!\nValor: $${stake}\nDuração: ${duration} ticks`)}
+                    className={`h-16 text-lg font-bold flex flex-col leading-tight ${analysis?.direction !== 'CALL' ? 'opacity-50 grayscale' : ''}`}
+                    onClick={() => handleTrade('CALL')}
+                    disabled={isMarketLocked}
                 >
                     <span className="flex items-center gap-1">CALL <TrendingUp className="h-4 w-4" /></span>
-                    <span className="text-xs opacity-80 font-normal">Para cima</span>
                 </Button>
                 <Button 
                     variant="danger" 
-                    className="h-16 text-lg font-bold flex flex-col leading-tight"
-                    onClick={() => alert(`Ordem PUT enviada!\nValor: $${stake}\nDuração: ${duration} ticks`)}
+                    className={`h-16 text-lg font-bold flex flex-col leading-tight ${analysis?.direction !== 'PUT' ? 'opacity-50 grayscale' : ''}`}
+                    onClick={() => handleTrade('PUT')}
+                    disabled={isMarketLocked}
                 >
                     <span className="flex items-center gap-1">PUT <TrendingDown className="h-4 w-4" /></span>
-                    <span className="text-xs opacity-80 font-normal">Para baixo</span>
                 </Button>
               </div>
+              <p className="text-xs text-center text-slate-400 mt-2">Botões destacados apenas se alinhados com a IA.</p>
             </CardContent>
           </Card>
         </div>
