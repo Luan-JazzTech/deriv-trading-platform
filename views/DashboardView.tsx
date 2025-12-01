@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, AlertTriangle, ArrowRight, Zap } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, AlertTriangle, ArrowRight, Zap, Clock } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 
@@ -126,35 +126,81 @@ export function DashboardView() {
   // Renderização do Gráfico
   const renderChart = () => {
     if (candles.length === 0) return null;
+    
+    // 1. Encontrar Min e Max da tela atual para escala
     const minPrice = Math.min(...candles.map(c => c.low));
     const maxPrice = Math.max(...candles.map(c => c.high));
-    const priceRange = maxPrice - minPrice || 1;
-    const width = 800;
+    const priceRange = maxPrice - minPrice || 1; // Evitar divisão por zero
+    
+    // Dimensões
+    const width = 800; // Unidades SVG arbitrárias
     const height = 300;
-    const padding = 20;
+    const padding = 40; // Mais espaço para não cortar pavio
     const usableHeight = height - (padding * 2);
-    const candleWidth = (width / candles.length) * 0.7;
+    
+    // Largura da vela baseada na quantidade (zoom fit)
+    const candleWidth = (width / candles.length) * 0.6;
     const spacing = (width / candles.length);
 
     return (
-      <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
-        <line x1="0" y1={height/2} x2={width} y2={height/2} stroke="#e2e8f0" strokeDasharray="4" />
+      <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} className="overflow-visible preserve-3d">
+        {/* Linha de Grade Central */}
+        <line x1="0" y1={height/2} x2={width} y2={height/2} stroke="#f1f5f9" strokeDasharray="4" />
+        
         {candles.map((candle, index) => {
-          const yOpen = height - padding - ((candle.open - minPrice) / priceRange) * usableHeight;
-          const yClose = height - padding - ((candle.close - minPrice) / priceRange) * usableHeight;
-          const yHigh = height - padding - ((candle.high - minPrice) / priceRange) * usableHeight;
-          const yLow = height - padding - ((candle.low - minPrice) / priceRange) * usableHeight;
+          // Normalização Y: (Valor - Min) / Range -> 0 a 1 -> Multiplica por Altura -> Inverte (SVG Y é pra baixo)
+          const normalizeY = (val: number) => height - padding - ((val - minPrice) / priceRange) * usableHeight;
+          
+          const yOpen = normalizeY(candle.open);
+          const yClose = normalizeY(candle.close);
+          const yHigh = normalizeY(candle.high);
+          const yLow = normalizeY(candle.low);
+          
           const isGreen = candle.close >= candle.open;
-          const color = isGreen ? '#22c55e' : '#ef4444'; 
+          const color = isGreen ? '#10b981' : '#ef4444'; // Tailwind Green-500 / Red-500
           const x = index * spacing + (spacing - candleWidth) / 2;
+          
+          // Altura mínima visual de 1px para dojis
+          const bodyHeight = Math.max(1, Math.abs(yClose - yOpen));
+          
           return (
-            <g key={candle.time}>
-              <line x1={x + candleWidth/2} y1={yHigh} x2={x + candleWidth/2} y2={yLow} stroke={color} strokeWidth="1" />
-              <rect x={x} y={Math.min(yOpen, yClose)} width={candleWidth} height={Math.max(1, Math.abs(yClose - yOpen))} fill={color} />
+            <g key={candle.time} className="hover:opacity-80 transition-opacity cursor-crosshair">
+              {/* Pavio (Linha Vertical) */}
+              <line x1={x + candleWidth/2} y1={yHigh} x2={x + candleWidth/2} y2={yLow} stroke={color} strokeWidth="1.5" />
+              
+              {/* Corpo (Retângulo) */}
+              <rect 
+                x={x} 
+                y={Math.min(yOpen, yClose)} 
+                width={candleWidth} 
+                height={bodyHeight} 
+                fill={color} 
+                rx="1" // Leve arredondamento
+              />
             </g>
           );
         })}
-        <line x1="0" y1={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} x2={width} y2={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} stroke="#3b82f6" strokeWidth="1" strokeDasharray="4" />
+        
+        {/* Linha de Preço Atual (Pontilhada Azul) */}
+        <line 
+          x1="0" 
+          y1={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} 
+          x2={width} 
+          y2={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} 
+          stroke="#3b82f6" 
+          strokeWidth="1" 
+          strokeDasharray="4" 
+        />
+        <text 
+            x={width - 5} 
+            y={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight - 5} 
+            textAnchor="end" 
+            fill="#3b82f6" 
+            fontSize="12" 
+            fontWeight="bold"
+        >
+            {currentPrice.toFixed(2)}
+        </text>
       </svg>
     );
   };
@@ -169,6 +215,9 @@ export function DashboardView() {
               <Activity className="h-4 w-4 mr-1" />
               Mercado em tempo real
             </span>
+            <span className="text-xs px-2 py-0.5 bg-slate-100 rounded text-slate-500">
+                Tick: 1s
+            </span>
           </div>
         </div>
         <Card className="w-48 bg-slate-900 text-white border-slate-800">
@@ -180,7 +229,10 @@ export function DashboardView() {
       </div>
 
       <div className="grid grid-cols-12 gap-6">
+        {/* Coluna Esquerda: Gráfico + Análise */}
         <div className="col-span-12 lg:col-span-8 space-y-4">
+          
+          {/* Gráfico */}
           <Card className="h-[400px] flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between pb-2 border-b">
               <CardTitle className="text-sm font-medium text-slate-500">Gráfico de Preço (Simulação)</CardTitle>
@@ -209,10 +261,16 @@ export function DashboardView() {
              analysis?.direction === 'PUT' ? 'border-l-red-500' : 'border-l-slate-300'
            }`}>
             <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Zap className="h-5 w-5 text-yellow-500" />
-                Sinal da Inteligência Artificial
-              </CardTitle>
+              <div className="flex justify-between items-start">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Zap className="h-5 w-5 text-yellow-500" />
+                    Sinal da Inteligência Artificial
+                  </CardTitle>
+                  <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded">
+                      <Clock className="h-3 w-3" />
+                      <span>Entrada: <strong>Vela Atual</strong> (Baseado em fechamento anterior)</span>
+                  </div>
+              </div>
             </CardHeader>
             <CardContent>
               {analysis ? (
@@ -267,6 +325,7 @@ export function DashboardView() {
           </Card>
         </div>
 
+        {/* Coluna Direita: Execução */}
         <div className="col-span-12 lg:col-span-4 space-y-4">
           <Card className="bg-white shadow-lg border-slate-200 h-full flex flex-col">
             <CardHeader className="bg-slate-50 border-b">
