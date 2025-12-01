@@ -1,12 +1,63 @@
-import React, { useState } from 'react';
+
+import React, { useState, Component, ErrorInfo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Layout } from './components/Layout';
 import { LoginView } from './views/LoginView';
 import { DashboardView } from './views/DashboardView';
 import { SettingsView } from './views/SettingsView';
+import { AlertTriangle, RefreshCcw } from 'lucide-react';
 
 // Tipos de rotas disponíveis
 type ViewState = 'login' | 'dashboard' | 'settings' | 'logs';
+
+// --- ERROR BOUNDARY (Proteção contra Tela Branca) ---
+class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  handleRetry = () => {
+      this.setState({ hasError: false, error: null });
+      window.location.reload();
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+          <div className="bg-red-500/10 p-4 rounded-full mb-4">
+            <AlertTriangle className="h-12 w-12 text-red-500" />
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-2">Ops! Algo deu errado.</h1>
+          <p className="text-slate-400 max-w-md mb-6">
+            A aplicação encontrou um erro inesperado. Isso geralmente acontece por falha na conexão ou dados inválidos.
+          </p>
+          <div className="bg-slate-900 p-4 rounded text-left text-xs text-red-400 font-mono mb-6 w-full max-w-md overflow-auto">
+             {this.state.error?.message}
+          </div>
+          <button 
+            onClick={this.handleRetry}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-bold transition-colors"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Recarregar Aplicação
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 const App = () => {
   // Estado simples de autenticação simulada
@@ -25,25 +76,31 @@ const App = () => {
 
   // Se não estiver logado, força tela de login
   if (!isAuthenticated) {
-    return <LoginView onLoginSuccess={handleLogin} />;
+    return (
+        <ErrorBoundary>
+            <LoginView onLoginSuccess={handleLogin} />
+        </ErrorBoundary>
+    );
   }
 
   // Renderiza a view correta dentro do Layout
   return (
-    <Layout 
-      activeView={currentView} 
-      onChangeView={(view) => setCurrentView(view as ViewState)}
-      onLogout={handleLogout}
-    >
-      {currentView === 'dashboard' && <DashboardView />}
-      {currentView === 'settings' && <SettingsView />}
-      {currentView === 'logs' && (
-        <div className="p-12 text-center text-slate-500">
-          <h2 className="text-2xl font-bold mb-2">Logs de Auditoria</h2>
-          <p>Histórico de operações será listado aqui na próxima fase.</p>
-        </div>
-      )}
-    </Layout>
+    <ErrorBoundary>
+        <Layout 
+        activeView={currentView} 
+        onChangeView={(view) => setCurrentView(view as ViewState)}
+        onLogout={handleLogout}
+        >
+        {currentView === 'dashboard' && <DashboardView />}
+        {currentView === 'settings' && <SettingsView />}
+        {currentView === 'logs' && (
+            <div className="p-12 text-center text-slate-500">
+            <h2 className="text-2xl font-bold mb-2">Logs de Auditoria</h2>
+            <p>Histórico de operações será listado aqui na próxima fase.</p>
+            </div>
+        )}
+        </Layout>
+    </ErrorBoundary>
   );
 };
 

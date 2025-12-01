@@ -112,29 +112,37 @@ export function DashboardView() {
   
   // --- CONEXÃO COM API DERIV ---
   useEffect(() => {
+    let mounted = true;
+
     const initDeriv = async () => {
         try {
             const authResponse = await derivApi.connect();
-            setIsConnected(true);
             
-            if (authResponse && authResponse.authorize) {
-                setAccountInfo({
-                    balance: authResponse.authorize.balance,
-                    currency: authResponse.authorize.currency,
-                    isVirtual: !!authResponse.authorize.is_virtual,
-                    email: authResponse.authorize.email
-                });
+            if (!mounted) return;
 
-                // Inscreve para atualizações de saldo
-                derivApi.subscribeBalance((data) => {
-                    setAccountInfo(prev => prev ? { ...prev, balance: data.balance, currency: data.currency } : null);
-                });
+            if (authResponse) {
+                setIsConnected(true);
+                if (authResponse.authorize) {
+                    setAccountInfo({
+                        balance: authResponse.authorize.balance,
+                        currency: authResponse.authorize.currency,
+                        isVirtual: !!authResponse.authorize.is_virtual,
+                        email: authResponse.authorize.email
+                    });
+
+                    derivApi.subscribeBalance((data) => {
+                        if (!mounted) return;
+                        setAccountInfo(prev => prev ? { ...prev, balance: data.balance, currency: data.currency } : null);
+                    });
+                }
             }
         } catch (e) {
             console.error("Falha ao conectar Deriv:", e);
         }
     };
     initDeriv();
+
+    return () => { mounted = false; };
   }, []);
 
   // --- CARREGAR DADOS DE MERCADO REAIS ---
@@ -193,7 +201,7 @@ export function DashboardView() {
 
   // --- ANALISAR MERCADO SEMPRE QUE CANDLES MUDAM ---
   useEffect(() => {
-    if (candles.length > 20) {
+    if (candles && candles.length > 20) {
         const result = analyzeMarket(candles);
         setAnalysis(result);
     }
@@ -327,14 +335,19 @@ export function DashboardView() {
   };
 
   const renderChart = () => {
-    if (candles.length === 0) return <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-pulse gap-2"><Activity className="h-8 w-8" />Carregando Gráfico Deriv...</div>;
+    if (!candles || candles.length === 0) return <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-pulse gap-2"><Activity className="h-8 w-8" />Carregando Gráfico Deriv...</div>;
     
-    const minPrice = Math.min(...candles.map(c => c.low));
-    const maxPrice = Math.max(...candles.map(c => c.high));
-    const priceRange = maxPrice - minPrice || 1;
+    // Proteção contra valores NaN/Undefined
+    const safeCandles = candles.filter(c => c && !isNaN(c.high) && !isNaN(c.low));
+    if (safeCandles.length < 2) return <div className="h-full flex flex-col items-center justify-center text-slate-500">Dados insuficientes...</div>;
+
+    const minPrice = Math.min(...safeCandles.map(c => c.low));
+    const maxPrice = Math.max(...safeCandles.map(c => c.high));
+    const priceRange = (maxPrice - minPrice) || 0.0001; // Evita divisão por zero
+    
     const width = 800; const height = 350; const padding = 40; const usableHeight = height - (padding * 2);
-    const candleWidth = (width / Math.max(candles.length, 1)) * 0.7;
-    const spacing = (width / Math.max(candles.length, 1));
+    const candleWidth = (width / Math.max(safeCandles.length, 1)) * 0.7;
+    const spacing = (width / Math.max(safeCandles.length, 1));
     const formatPrice = (p: number) => p.toFixed(activeAsset.decimals);
 
     return (
@@ -351,8 +364,12 @@ export function DashboardView() {
         <rect width="100%" height="100%" fill="url(#grid)" />
         <rect width="100%" height="100%" fill="url(#chartGradient)" />
 
-        {candles.map((candle, index) => {
-          const normalizeY = (val: number) => height - padding - ((val - minPrice) / priceRange) * usableHeight;
+        {safeCandles.map((candle, index) => {
+          const normalizeY = (val: number) => {
+             const safeVal = isNaN(val) ? minPrice : val;
+             return height - padding - ((safeVal - minPrice) / priceRange) * usableHeight;
+          };
+
           const yOpen = normalizeY(candle.open); const yClose = normalizeY(candle.close);
           const yHigh = normalizeY(candle.high); const yLow = normalizeY(candle.low);
           const isGreen = candle.close >= candle.open;
@@ -368,6 +385,7 @@ export function DashboardView() {
           );
         })}
         
+        {/* Linha de Preço Atual */}
         <line x1="0" y1={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} x2={width} y2={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} stroke="#3b82f6" strokeWidth="1" strokeDasharray="4" opacity="0.8" />
         <rect x={width - 60} y={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight - 10} width="60" height="20" fill="#3b82f6" rx="2" />
         <text x={width - 30} y={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} fill="white" fontSize="11" fontWeight="bold" textAnchor="middle" alignmentBaseline="middle">
