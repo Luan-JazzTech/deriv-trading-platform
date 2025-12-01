@@ -12,15 +12,23 @@ export class DerivAPI {
     private pendingRequests = new Map<number, { resolve: (value: any) => void, reject: (reason?: any) => void }>();
   
     constructor() {
-      if (typeof window !== 'undefined') {
-        this.token = localStorage.getItem('deriv_token');
-      }
+      // Token é lido no connect() para garantir atualização
     }
   
     connect(): Promise<any> {
       return new Promise((resolve, reject) => {
+        // Recarrega token do storage sempre que tentar conectar
+        if (typeof window !== 'undefined') {
+            this.token = localStorage.getItem('deriv_token');
+        }
+
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          resolve(null);
+          // Se já estiver conectado, revalida autorização
+          if (this.token) {
+              this.authorize(this.token).then(resolve).catch(() => resolve(null));
+          } else {
+              resolve(null);
+          }
           return;
         }
   
@@ -30,7 +38,7 @@ export class DerivAPI {
           console.log('✅ Conectado à Deriv WebSocket');
           if (this.token) {
             this.authorize(this.token)
-                .then((res) => resolve(res)) // Retorna os dados da conta ao conectar
+                .then((res) => resolve(res))
                 .catch(err => {
                     console.error("Falha na autorização inicial:", err);
                     resolve(null); 
@@ -43,7 +51,7 @@ export class DerivAPI {
         this.ws.onmessage = (msg) => {
           const data = JSON.parse(msg.data);
           
-          // 1. Tratamento de Requisições (Response-Request matching)
+          // 1. Tratamento de Requisições
           if (data.req_id && this.pendingRequests.has(data.req_id)) {
               const { resolve, reject } = this.pendingRequests.get(data.req_id)!;
               
@@ -56,12 +64,10 @@ export class DerivAPI {
               this.pendingRequests.delete(data.req_id);
           }
 
-          // 2. Tratamento de Streams (Ticks)
+          // 2. Streams
           if (data.msg_type === 'tick' && this.onTickCallback) {
             this.onTickCallback(data.tick);
           }
-
-          // 3. Tratamento de Streams (Saldo/Balance)
           if (data.msg_type === 'balance' && this.onBalanceCallback) {
             this.onBalanceCallback(data.balance);
           }
@@ -74,6 +80,7 @@ export class DerivAPI {
   
         this.ws.onclose = () => {
           console.log('⚠️ Conexão Deriv fechada');
+          this.ws = null;
         };
       });
     }
@@ -91,6 +98,8 @@ export class DerivAPI {
     }
   
     async getHistory(symbol: string, granularity: number = 60, count: number = 100) {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return [];
+
       try {
           const response = await this.send({
             ticks_history: symbol,
@@ -102,28 +111,18 @@ export class DerivAPI {
             granularity: granularity
           });
       
-          if (response.error) {
-            console.error('Erro ao buscar histórico:', response.error);
-            return [];
-          }
+          if (response.error) return [];
           
-          const list = response.candles || response.history;
-          if (!list) return [];
-
-          // Se for 'candles' (formato OHLC)
           if (response.candles) {
               return response.candles.map((c: any) => ({
                 time: c.epoch * 1000,
-                open: c.open,
-                high: c.high,
-                low: c.low,
-                close: c.close
+                open: Number(c.open),
+                high: Number(c.high),
+                low: Number(c.low),
+                close: Number(c.close)
               }));
           }
-          
-          // Tratamento para ativos que retornam 'history' (apenas ticks/preços) se candles falhar
           return [];
-
       } catch (e) {
           console.error("Exception getHistory", e);
           return [];
@@ -131,12 +130,10 @@ export class DerivAPI {
     }
   
     subscribeTicks(symbol: string, callback: (tick: any) => void) {
-      // Cancela anterior se existir
       if (this.tickSubscriptionId) {
         this.send({ forget: this.tickSubscriptionId }).catch(() => {});
         this.tickSubscriptionId = null;
       }
-      
       this.onTickCallback = callback;
       this.send({ ticks: symbol }).then(res => {
         if (!res.error && res.subscription) {
@@ -159,27 +156,28 @@ export class DerivAPI {
           symbol: symbol
         }
       };
-  
-      console.log('🚀 Enviando Ordem:', payload);
       return this.send(payload);
     }
   
     private send(data: any): Promise<any> {
       return new Promise((resolve, reject) => {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          // Tentar reconectar ou falhar
-          console.warn("WS não conectado, tentando reconectar...");
           this.connect().then(() => {
-              this.send(data).then(resolve).catch(reject);
+              // Tenta enviar novamente após reconectar
+              if (this.ws?.readyState === WebSocket.OPEN) {
+                 const req_id = ++this.reqIdCounter;
+                 this.pendingRequests.set(req_id, { resolve, reject });
+                 this.ws.send(JSON.stringify({ ...data, req_id }));
+              } else {
+                 reject('Failed to reconnect');
+              }
           }).catch(() => reject('WebSocket Offline'));
           return;
         }
 
         const req_id = ++this.reqIdCounter;
         this.pendingRequests.set(req_id, { resolve, reject });
-        
-        const payload = { ...data, req_id };
-        this.ws.send(JSON.stringify(payload));
+        this.ws.send(JSON.stringify({ ...data, req_id }));
       });
     }
 }
