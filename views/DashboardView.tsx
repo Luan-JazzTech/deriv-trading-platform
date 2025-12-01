@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2 } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 
@@ -64,11 +64,12 @@ export function DashboardView() {
       stake: 5.0,
       
       // Stop Financeiro
-      stopWin: 20.0,
-      stopLoss: 15.0,
+      stopWinValue: 20.0,
+      stopLossValue: 15.0,
       
-      // Stop Quantidade
-      maxTrades: 3,
+      // Stop Quantidade (Novo)
+      stopWinCount: 2,  // Parar após X vitórias
+      stopLossCount: 1, // Parar após Y derrotas
 
       // Agendamento
       scheduleEnabled: false,
@@ -87,9 +88,11 @@ export function DashboardView() {
   // Verifica se o Bot deve parar
   const isAutoLocked = () => {
     if (stopMode === 'QUANTITY') {
-        return dailyStats.trades >= autoSettings.maxTrades;
+        // Nova Lógica: Para se atingir X vitórias OU Y derrotas
+        return dailyStats.wins >= autoSettings.stopWinCount || dailyStats.losses >= autoSettings.stopLossCount;
     } else {
-        return dailyStats.profit >= autoSettings.stopWin || dailyStats.profit <= -Math.abs(autoSettings.stopLoss);
+        // Lógica Financeira
+        return dailyStats.profit >= autoSettings.stopWinValue || dailyStats.profit <= -Math.abs(autoSettings.stopLossValue);
     }
   };
 
@@ -162,19 +165,17 @@ export function DashboardView() {
 
   // --- GERADOR DE RANKING FAKE ---
   useEffect(() => {
-    // Atualiza o ranking a cada 10 segundos
     const rankingInterval = setInterval(() => {
         const sorted = [...AVAILABLE_ASSETS]
             .map(asset => ({
                 id: asset.id,
                 name: asset.name,
-                // Simula um winrate e direção
                 winRate: Math.floor(Math.random() * (98 - 70) + 70),
                 direction: Math.random() > 0.5 ? 'CALL' : 'PUT' as 'CALL' | 'PUT',
                 score: Math.floor(Math.random() * 100)
             }))
             .sort((a, b) => b.winRate - a.winRate)
-            .slice(0, 5); // Top 5
+            .slice(0, 5); 
         setMarketRanking(sorted);
     }, 10000);
 
@@ -188,10 +189,9 @@ export function DashboardView() {
           return;
       }
 
-      // 1. Verifica Agendamento (Dia e Hora)
       if (autoSettings.scheduleEnabled) {
           const now = new Date();
-          const currentDay = now.getDay(); // 0-6
+          const currentDay = now.getDay();
           
           if (!autoSettings.activeDays.includes(currentDay)) {
              setBotStatus('WAITING_SCHEDULE');
@@ -210,15 +210,15 @@ export function DashboardView() {
           }
       }
 
-      // 2. Verifica Travas de Segurança
       if (isAutoLocked()) {
           setBotStatus('STOPPED_BY_RISK');
+          // Opcional: Desligar o bot automaticamente ao bater meta
+          // setIsAutoRunning(false); 
           return;
       }
 
       setBotStatus('RUNNING');
 
-      // 3. Executar Trade
       if (analysis && analysis.isSniperReady) {
           if (analysis.timestamp <= lastAutoTradeTimestamp.current) return;
 
@@ -231,7 +231,6 @@ export function DashboardView() {
 
 
   const handleTrade = (type: 'CALL' | 'PUT', tradeStake = stake) => {
-      // Manual mode lock check
       if (executionMode === 'MANUAL' && isManualLocked) return;
 
       const isWin = Math.random() > 0.4;
@@ -266,7 +265,6 @@ export function DashboardView() {
       }
   };
 
-  // --- RENDERIZADOR DE GRÁFICO (DARK THEME) ---
   const renderChart = () => {
     if (candles.length === 0) return <div className="h-full flex items-center justify-center text-slate-500">Carregando mercado...</div>;
     const minPrice = Math.min(...candles.map(c => c.low));
@@ -279,7 +277,6 @@ export function DashboardView() {
 
     return (
       <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} className="overflow-visible preserve-3d bg-[#0B1120] rounded-lg">
-        {/* Grid Background */}
         <defs>
           <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
             <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" strokeWidth="0.5" opacity="0.5"/>
@@ -354,16 +351,23 @@ export function DashboardView() {
                     <p className={`text-sm font-bold font-mono ${dailyStats.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {dailyStats.profit >= 0 ? '+' : ''}{formatCurrency(dailyStats.profit)}
                     </p>
-                    <span className="text-[10px] text-slate-600 font-mono">/ {stopMode === 'FINANCIAL' ? formatCurrency(autoSettings.stopWin) : '---'}</span>
+                    <span className="text-[10px] text-slate-600 font-mono">/ {stopMode === 'FINANCIAL' ? formatCurrency(autoSettings.stopWinValue) : '---'}</span>
                 </div>
             </div>
             <div className="px-5 py-2">
-                <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider">Trades</p>
-                <div className="flex items-center gap-1">
-                    <p className={`text-sm font-bold font-mono ${dailyStats.trades >= autoSettings.maxTrades ? 'text-red-500' : 'text-slate-200'}`}>
-                        {dailyStats.trades}
-                    </p>
-                    <span className="text-[10px] text-slate-600 font-mono">/ {stopMode === 'QUANTITY' ? autoSettings.maxTrades : '---'}</span>
+                <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider">Stop Count</p>
+                <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 text-green-400" title="Vitórias">
+                        <CheckCircle2 className="h-3 w-3" />
+                        <span className="text-xs font-bold font-mono">{dailyStats.wins}</span>
+                        {stopMode === 'QUANTITY' && <span className="text-[9px] text-slate-600">/{autoSettings.stopWinCount}</span>}
+                    </div>
+                    <div className="w-px h-3 bg-slate-700"></div>
+                    <div className="flex items-center gap-1 text-red-400" title="Derrotas">
+                        <XCircle className="h-3 w-3" />
+                        <span className="text-xs font-bold font-mono">{dailyStats.losses}</span>
+                        {stopMode === 'QUANTITY' && <span className="text-[9px] text-slate-600">/{autoSettings.stopLossCount}</span>}
+                    </div>
                 </div>
             </div>
         </div>
@@ -534,17 +538,31 @@ export function DashboardView() {
                             <div className="grid grid-cols-2 gap-3 animate-in slide-in-from-left-2">
                                 <div className="space-y-1">
                                     <label className="text-[10px] text-slate-400 uppercase">Stop Loss ($)</label>
-                                    <input type="number" value={Math.abs(autoSettings.stopLoss)} onChange={(e) => setAutoSettings({...autoSettings, stopLoss: -Math.abs(Number(e.target.value))})} className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-red-400 font-bold" />
+                                    <input type="number" value={Math.abs(autoSettings.stopLossValue)} onChange={(e) => setAutoSettings({...autoSettings, stopLossValue: -Math.abs(Number(e.target.value))})} className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-red-400 font-bold" />
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-[10px] text-slate-400 uppercase">Stop Win ($)</label>
-                                    <input type="number" value={autoSettings.stopWin} onChange={(e) => setAutoSettings({...autoSettings, stopWin: Number(e.target.value)})} className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-green-400 font-bold" />
+                                    <input type="number" value={autoSettings.stopWinValue} onChange={(e) => setAutoSettings({...autoSettings, stopWinValue: Number(e.target.value)})} className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-green-400 font-bold" />
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-1 animate-in slide-in-from-right-2">
-                                <label className="text-[10px] text-slate-400 uppercase">Máximo de Operações</label>
-                                <input type="number" value={autoSettings.maxTrades} onChange={(e) => setAutoSettings({...autoSettings, maxTrades: Number(e.target.value)})} className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-white font-bold" />
+                            <div className="grid grid-cols-2 gap-3 animate-in slide-in-from-right-2">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-400 uppercase">Meta de Wins</label>
+                                    <div className="relative">
+                                        <CheckCircle2 className="absolute left-2 top-2 h-3.5 w-3.5 text-green-500" />
+                                        <input type="number" value={autoSettings.stopWinCount} onChange={(e) => setAutoSettings({...autoSettings, stopWinCount: Number(e.target.value)})} className="w-full h-9 pl-7 bg-slate-950 border border-slate-800 rounded text-white font-bold" />
+                                    </div>
+                                    <p className="text-[9px] text-slate-600">Parar após {autoSettings.stopWinCount} vitórias</p>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-400 uppercase">Limite de Loss</label>
+                                    <div className="relative">
+                                        <XCircle className="absolute left-2 top-2 h-3.5 w-3.5 text-red-500" />
+                                        <input type="number" value={autoSettings.stopLossCount} onChange={(e) => setAutoSettings({...autoSettings, stopLossCount: Number(e.target.value)})} className="w-full h-9 pl-7 bg-slate-950 border border-slate-800 rounded text-white font-bold" />
+                                    </div>
+                                    <p className="text-[9px] text-slate-600">Parar após {autoSettings.stopLossCount} derrotas</p>
+                                </div>
                             </div>
                         )}
 
