@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { TrendingUp, TrendingDown, DollarSign, Activity, AlertTriangle, ArrowRight } from 'lucide-react';
@@ -18,19 +18,30 @@ export function DashboardView() {
   const [currentPrice, setCurrentPrice] = useState(1050.00);
   const [candles, setCandles] = useState<Candle[]>([]);
 
+  // Ref para controlar o tempo de criação do último candle sem causar re-render
+  const lastCandleCreationRef = useRef<number>(Date.now());
+
   // Simulação de Mercado (Gerador de Candles Fake)
   useEffect(() => {
-    // Resetar candles ao mudar timeframe para dar feedback visual
-    setCandles([]); 
+    // Resetar estado ao mudar timeframe
+    setCandles([]);
+    lastCandleCreationRef.current = Date.now();
     
-    // Inicializa com 50 candles aleatórios com volatilidade ajustada pelo timeframe
+    // Configuração de Velocidade da Simulação (Acelerado para Teste)
+    // M1 = Nova vela a cada 3 segundos
+    // M5 = Nova vela a cada 10 segundos
+    // M15 = Nova vela a cada 20 segundos
+    const candleDuration = timeframe === 'M1' ? 3000 : timeframe === 'M5' ? 10000 : 20000;
+    
+    // Inicializa com 30 candles históricos para preencher o gráfico visualmente
     const initialCandles: Candle[] = [];
     let price = 1050.00;
     const now = Date.now();
+    
     // Volatilidade baseada no timeframe (apenas visual)
-    const volatilityMultiplier = timeframe === 'M1' ? 1 : timeframe === 'M5' ? 2 : 4;
+    const volatilityMultiplier = timeframe === 'M1' ? 1 : timeframe === 'M5' ? 2.5 : 5;
 
-    for (let i = 40; i > 0; i--) {
+    for (let i = 30; i > 0; i--) {
       const open = price;
       const move = (Math.random() - 0.5) * 5 * volatilityMultiplier;
       const close = price + move;
@@ -38,7 +49,7 @@ export function DashboardView() {
       const low = Math.min(open, close) - Math.random() * 2;
       
       initialCandles.push({
-        time: now - i * 60000,
+        time: now - (i * candleDuration), // Espaçamento de tempo simulado
         open,
         high,
         low,
@@ -47,52 +58,61 @@ export function DashboardView() {
       price = close;
     }
     setCandles(initialCandles);
+    setCurrentPrice(price);
 
-    // Loop de atualização
+    // Loop de atualização (Tick Rate de 500ms)
     const interval = setInterval(() => {
+      const currentTime = Date.now();
+      const timeSinceLastCandle = currentTime - lastCandleCreationRef.current;
+      const shouldCreateNewCandle = timeSinceLastCandle >= candleDuration;
+
+      // Volatilidade do tick atual
+      const tickVolatility = timeframe === 'M1' ? 1.5 : timeframe === 'M5' ? 3 : 5;
+      const change = (Math.random() - 0.5) * tickVolatility;
+
       setCandles(prev => {
         if (prev.length === 0) return prev;
+        
         const last = prev[prev.length - 1];
-        
-        // Random Walk
-        const change = (Math.random() - 0.5) * 2;
-        const newPrice = last.close + change;
-        
-        setCurrentPrice(newPrice);
+        let newHistory = [...prev];
 
-        // 20% de chance de criar novo candle
-        if (Math.random() > 0.8) {
+        if (shouldCreateNewCandle) {
+            // FECHAR VELA ATUAL E ABRIR UMA NOVA
             const newCandle: Candle = {
-                time: Date.now(),
-                open: last.close,
-                close: newPrice,
-                high: Math.max(last.close, newPrice),
-                low: Math.min(last.close, newPrice)
+                time: currentTime,
+                open: last.close, // Abre onde a anterior fechou
+                close: last.close + change,
+                high: Math.max(last.close, last.close + change),
+                low: Math.min(last.close, last.close + change)
             };
-            // Mantém últimos 40 candles
-            const newHistory = [...prev.slice(1), newCandle];
+            newHistory = [...prev.slice(1), newCandle]; // Mantém tamanho fixo removendo a primeira
+            lastCandleCreationRef.current = currentTime; // Reseta timer
             
-            const result = analyzeMarket(newHistory);
-            setAnalysis(result);
-            
-            return newHistory;
+            // Atualiza preço atual de referência
+            setCurrentPrice(newCandle.close);
         } else {
-            // Atualiza último candle
+            // ATUALIZAR VELA EXISTENTE (Tick)
+            const newClose = last.close + change;
             const updatedLast = { 
                 ...last, 
-                close: newPrice,
-                high: Math.max(last.high, newPrice),
-                low: Math.min(last.low, newPrice) 
+                close: newClose,
+                high: Math.max(last.high, newClose),
+                low: Math.min(last.low, newClose) 
             };
-            const newHistory = [...prev.slice(0, -1), updatedLast];
+            newHistory = [...prev.slice(0, -1), updatedLast];
             
-            const result = analyzeMarket(newHistory);
-            setAnalysis(result);
-            
-            return newHistory;
+            // Atualiza preço atual de referência
+            setCurrentPrice(newClose);
         }
+
+        // Rodar análise técnica a cada tick
+        const result = analyzeMarket(newHistory);
+        setAnalysis(result);
+
+        return newHistory;
       });
-    }, 500); // Mais rápido para ver movimento
+
+    }, 500); // Atualiza o preço a cada meio segundo (Tick)
 
     return () => clearInterval(interval);
   }, [timeframe]);
@@ -115,7 +135,7 @@ export function DashboardView() {
     return (
       <div className="relative w-full h-full flex items-end justify-between px-2 gap-1 overflow-hidden">
         {/* Linhas de Grade (Grid) */}
-        <div className="absolute inset-0 flex flex-col justify-between text-[10px] text-slate-300 pointer-events-none p-1">
+        <div className="absolute inset-0 flex flex-col justify-between text-[10px] text-slate-300 pointer-events-none p-1 z-0">
             <span className="border-b border-slate-100 w-full">{maxPrice.toFixed(2)}</span>
             <span className="border-b border-slate-100 w-full">{(minPrice + range/2).toFixed(2)}</span>
             <span className="border-b border-slate-100 w-full">{minPrice.toFixed(2)}</span>
@@ -135,9 +155,9 @@ export function DashboardView() {
             const bodyHeight = Math.max(bodyTop - bodyBottom, 1); // Mínimo 1% para visibilidade
 
             return (
-                <div key={i} className="relative w-full h-full flex justify-center group">
+                <div key={i} className="relative w-full h-full flex justify-center group z-10">
                     {/* Tooltip simples */}
-                    <div className="hidden group-hover:block absolute bottom-full mb-1 bg-slate-800 text-white text-[10px] p-1 rounded z-10 whitespace-nowrap">
+                    <div className="hidden group-hover:block absolute bottom-full mb-1 bg-slate-800 text-white text-[10px] p-1 rounded z-20 whitespace-nowrap">
                         O:{c.open.toFixed(2)} C:{c.close.toFixed(2)}
                     </div>
 
@@ -195,9 +215,12 @@ export function DashboardView() {
                     <Activity className="h-5 w-5 text-slate-500" />
                     {symbol}
                 </CardTitle>
-                <span className="text-2xl font-mono font-bold text-slate-800">
-                    {currentPrice.toFixed(2)}
-                </span>
+                <div className="flex items-end gap-2">
+                    <span className="text-2xl font-mono font-bold text-slate-800">
+                        {currentPrice.toFixed(2)}
+                    </span>
+                    <span className="text-xs text-slate-400 mb-1">USD</span>
+                </div>
               </div>
               <div className="flex gap-2">
                 {['M1', 'M5', 'M15'].map((tf) => (
@@ -205,7 +228,7 @@ export function DashboardView() {
                     key={tf}
                     variant={timeframe === tf ? "default" : "outline"} 
                     size="sm" 
-                    className="text-xs"
+                    className="text-xs w-12"
                     onClick={() => setTimeframe(tf)}
                   >
                     {tf}
@@ -217,15 +240,21 @@ export function DashboardView() {
           <CardContent className="flex-1 bg-slate-50 relative p-4">
              {renderChart()}
              
-            <div className="absolute top-4 left-4 text-xs text-slate-400 bg-white/90 p-2 rounded border shadow-sm">
-                <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div> Live Feed</span>
+            <div className="absolute top-4 left-4 text-xs text-slate-500 bg-white/90 p-2 rounded border shadow-sm">
+                <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div> 
+                    <span className="font-medium">Live Feed (Simulado)</span>
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1">
+                    Velocidade: {timeframe === 'M1' ? '3s' : timeframe === 'M5' ? '10s' : '20s'}/vela
+                </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Control Panel */}
         <div className="space-y-6">
-          {/* Signal Card Dinâmico - Agora com Altura Fixa */}
+          {/* Signal Card Dinâmico */}
           <Card className={`h-[280px] flex flex-col border-l-4 transition-colors duration-300 ${analysis?.direction === 'CALL' ? 'border-l-green-500' : analysis?.direction === 'PUT' ? 'border-l-red-500' : 'border-l-slate-300'}`}>
             <CardHeader className="pb-2 flex-none">
               <CardTitle className="text-sm font-medium text-slate-500 uppercase">Sugestão da IA</CardTitle>
@@ -305,14 +334,14 @@ export function DashboardView() {
                 <Button 
                     variant="success" 
                     className="w-full h-12 text-lg font-bold disabled:opacity-50"
-                    disabled={analysis?.direction === 'PUT'} // Trava oposta para segurança (exemplo)
+                    disabled={analysis?.direction === 'PUT'} // Trava oposta
                 >
                   <TrendingUp className="mr-2 h-5 w-5" /> CALL
                 </Button>
                 <Button 
                     variant="danger" 
                     className="w-full h-12 text-lg font-bold disabled:opacity-50"
-                    disabled={analysis?.direction === 'CALL'} // Trava oposta para segurança
+                    disabled={analysis?.direction === 'CALL'} // Trava oposta
                 >
                   <TrendingDown className="mr-2 h-5 w-5" /> PUT
                 </Button>
