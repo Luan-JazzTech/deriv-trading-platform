@@ -1,10 +1,9 @@
-
 import React from 'react';
 import { LayoutDashboard, Settings, ScrollText, LogOut, TrendingUp } from 'lucide-react';
 import { Button } from './ui/Button';
 
 interface LayoutProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   activeView: string;
   onChangeView: (view: string) => void;
   onLogout: () => void;

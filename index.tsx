@@ -1,11 +1,9 @@
-
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Layout } from './components/Layout';
 import { LoginView } from './views/LoginView';
 import { DashboardView } from './views/DashboardView';
 import { SettingsView } from './views/SettingsView';
-import './index.css'; // Assume basic Tailwind setup if available, or we rely on injected styles
 
 // Tipos de rotas disponíveis
 type ViewState = 'login' | 'dashboard' | 'settings' | 'logs';
