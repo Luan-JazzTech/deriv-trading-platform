@@ -2,102 +2,82 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, CheckCircle2, XCircle, AlertTriangle, PlayCircle, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin } from 'lucide-react';
-import { formatCurrency } from '../lib/utils';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target } from 'lucide-react';
+import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 
-// Configuração dos Ativos Disponíveis (Forex, Cripto e Sintéticos)
+// --- CONFIGURAÇÃO DE ATIVOS (DERIV COMPLETA) ---
 const AVAILABLE_ASSETS = [
-  // Sintéticos (24/7)
-  { id: 'R_100', name: 'Volatility 100 (1s)', basePrice: 1240.50, volatility: 2.0, type: 'synthetic', decimals: 2 },
-  { id: 'R_75', name: 'Volatility 75 (1s)', basePrice: 450.25, volatility: 1.5, type: 'synthetic', decimals: 2 },
+  // --- SINTÉTICOS (VOLATILITY) ---
+  { id: 'R_100', name: 'Volatility 100 (1s)', basePrice: 1240.50, volatility: 2.0, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: 'R_75', name: 'Volatility 75 (1s)', basePrice: 450.25, volatility: 1.5, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: 'R_50', name: 'Volatility 50 (1s)', basePrice: 280.10, volatility: 0.8, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: 'R_25', name: 'Volatility 25 (1s)', basePrice: 1050.00, volatility: 1.2, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: 'R_10', name: 'Volatility 10 (1s)', basePrice: 1800.50, volatility: 1.0, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
   
-  // Forex (Seg-Sex)
-  { id: 'frxEURUSD', name: 'EUR/USD', basePrice: 1.0850, volatility: 0.00015, type: 'forex', decimals: 5 },
-  { id: 'frxGBPUSD', name: 'GBP/USD', basePrice: 1.2730, volatility: 0.00020, type: 'forex', decimals: 5 },
-  { id: 'frxUSDJPY', name: 'USD/JPY', basePrice: 155.40, volatility: 0.05, type: 'forex', decimals: 3 },
+  // --- SINTÉTICOS (JUMP/STEP) ---
+  { id: 'JUMP_10', name: 'Jump 10 Index', basePrice: 150.00, volatility: 3.5, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: 'BEAR', name: 'Bear Market Index', basePrice: 980.00, volatility: 1.1, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: 'BULL', name: 'Bull Market Index', basePrice: 1020.00, volatility: 1.1, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
 
-  // Cripto (24/7)
-  { id: 'cryBTCUSD', name: 'BTC/USD', basePrice: 64250.00, volatility: 45.0, type: 'crypto', decimals: 2 },
-  { id: 'cryETHUSD', name: 'ETH/USD', basePrice: 3450.00, volatility: 5.0, type: 'crypto', decimals: 2 },
+  // --- FOREX MAJORS ---
+  { id: 'frxEURUSD', name: 'EUR/USD', basePrice: 1.0850, volatility: 0.00015, type: 'forex', decimals: 5, group: 'Forex Majors' },
+  { id: 'frxGBPUSD', name: 'GBP/USD', basePrice: 1.2730, volatility: 0.00020, type: 'forex', decimals: 5, group: 'Forex Majors' },
+  { id: 'frxUSDJPY', name: 'USD/JPY', basePrice: 155.40, volatility: 0.05, type: 'forex', decimals: 3, group: 'Forex Majors' },
+  { id: 'frxAUDUSD', name: 'AUD/USD', basePrice: 0.6650, volatility: 0.00015, type: 'forex', decimals: 5, group: 'Forex Majors' },
+  
+  // --- COMMODITIES ---
+  { id: 'frxXAUUSD', name: 'Gold / USD', basePrice: 2350.00, volatility: 1.5, type: 'commodities', decimals: 2, group: 'Commodities' },
+  { id: 'frxXAGUSD', name: 'Silver / USD', basePrice: 30.50, volatility: 0.05, type: 'commodities', decimals: 3, group: 'Commodities' },
+  { id: 'frxOILUSD', name: 'Oil / USD', basePrice: 82.40, volatility: 0.10, type: 'commodities', decimals: 2, group: 'Commodities' },
+
+  // --- CRYPTO ---
+  { id: 'cryBTCUSD', name: 'BTC/USD', basePrice: 64250.00, volatility: 45.0, type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
+  { id: 'cryETHUSD', name: 'ETH/USD', basePrice: 3450.00, volatility: 5.0, type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
+  { id: 'cryLTCUSD', name: 'LTC/USD', basePrice: 85.00, volatility: 0.5, type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
 ];
 
 export function DashboardView() {
   const [balance, setBalance] = useState(1240.50);
-  
-  // Estado do Ativo Selecionado
   const [activeAsset, setActiveAsset] = useState(AVAILABLE_ASSETS[0]);
-  
   const [stake, setStake] = useState(10);
-  const [duration, setDuration] = useState(5);
   const [timeframe, setTimeframe] = useState('M1');
-
+  
   // Estado da Análise
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [currentPrice, setCurrentPrice] = useState(activeAsset.basePrice);
   const [candles, setCandles] = useState<Candle[]>([]);
 
   // --- GERENCIAMENTO DE RISCO SNIPER ---
-  const [dailyStats, setDailyStats] = useState({
-      trades: 0,
-      wins: 0,
-      losses: 0,
-      profit: 0
-  });
-  
-  // Configurações do Robô Sniper
-  const RISK_CONFIG = {
-      maxTrades: 3,         // Limite de 3 tiros
-      stopWin: 50.00,       // Meta de lucro
-      stopLoss: -30.00      // Limite de perda
-  };
+  const [dailyStats, setDailyStats] = useState({ trades: 0, wins: 0, losses: 0, profit: 0 });
+  const RISK_CONFIG = { maxTrades: 3, stopWin: 50.00, stopLoss: -30.00 };
+  const isMarketLocked = dailyStats.trades >= RISK_CONFIG.maxTrades || dailyStats.profit >= RISK_CONFIG.stopWin || dailyStats.profit <= RISK_CONFIG.stopLoss;
 
-  const isMarketLocked = 
-      dailyStats.trades >= RISK_CONFIG.maxTrades || 
-      dailyStats.profit >= RISK_CONFIG.stopWin || 
-      dailyStats.profit <= RISK_CONFIG.stopLoss;
-
-  // Ref para controlar o tempo
   const lastCandleCreationRef = useRef<number>(Date.now());
 
   // Simulação de Mercado
   useEffect(() => {
-    // Resetar gráfico ao trocar ativo ou timeframe
-    setCandles([]);
-    setAnalysis(null);
-    lastCandleCreationRef.current = Date.now();
-    
-    // M1 = 60s, M5 = 300s...
+    setCandles([]); setAnalysis(null); lastCandleCreationRef.current = Date.now();
     const candleDuration = timeframe === 'M1' ? 60000 : timeframe === 'M5' ? 300000 : 900000;
     
-    // Inicializar histórico
+    // Inicialização do Histórico
     const initialCandles: Candle[] = [];
-    let price = activeAsset.basePrice; // Preço base do ativo selecionado
+    let price = activeAsset.basePrice;
     const now = Date.now();
-    
-    // Volatilidade ajustada pelo ativo E pelo timeframe
     const volatilityMultiplier = (timeframe === 'M1' ? 1 : timeframe === 'M5' ? 2.5 : 5) * activeAsset.volatility;
 
-    for (let i = 60; i > 0; i--) {
+    for (let i = 80; i > 0; i--) {
       const open = price;
-      // Ajuste fino para evitar movimentos irreais em Forex
-      const rawMove = (Math.random() - 0.5) * 5; 
-      const move = rawMove * volatilityMultiplier;
-      
+      const move = (Math.random() - 0.5) * 5 * volatilityMultiplier;
       const close = price + move;
-      
-      // Criar High e Low baseados no Open/Close
       const bodyMax = Math.max(open, close);
       const bodyMin = Math.min(open, close);
-      const high = bodyMax + (Math.random() * volatilityMultiplier * 0.5);
-      const low = bodyMin - (Math.random() * volatilityMultiplier * 0.5);
-
       initialCandles.push({
         time: now - (i * candleDuration),
         open,
-        high,
-        low,
-        close
+        close,
+        high: bodyMax + (Math.random() * volatilityMultiplier * 0.5),
+        low: bodyMin - (Math.random() * volatilityMultiplier * 0.5)
       });
       price = close;
     }
@@ -108,7 +88,6 @@ export function DashboardView() {
       const currentTime = Date.now();
       const timeSinceLastCandle = currentTime - lastCandleCreationRef.current;
       const shouldCreateNewCandle = timeSinceLastCandle >= candleDuration;
-
       const tickVolatility = (timeframe === 'M1' ? 0.8 : 2) * activeAsset.volatility;
       const change = (Math.random() - 0.5) * tickVolatility;
 
@@ -119,11 +98,8 @@ export function DashboardView() {
 
         if (shouldCreateNewCandle) {
             const newCandle: Candle = {
-                time: currentTime,
-                open: last.close, 
-                close: last.close + change,
-                high: Math.max(last.close, last.close + change),
-                low: Math.min(last.close, last.close + change)
+                time: currentTime, open: last.close, close: last.close + change,
+                high: Math.max(last.close, last.close + change), low: Math.min(last.close, last.close + change)
             };
             newHistory = [...prev.slice(1), newCandle]; 
             lastCandleCreationRef.current = currentTime;
@@ -131,10 +107,8 @@ export function DashboardView() {
         } else {
             const newClose = last.close + change;
             const updatedLast = { 
-                ...last, 
-                close: newClose,
-                high: Math.max(last.high, newClose),
-                low: Math.min(last.low, newClose) 
+                ...last, close: newClose,
+                high: Math.max(last.high, newClose), low: Math.min(last.low, newClose) 
             };
             newHistory = [...prev.slice(0, -1), updatedLast];
             setCurrentPrice(newClose);
@@ -147,83 +121,73 @@ export function DashboardView() {
     }, 1000); 
 
     return () => clearInterval(interval);
-  }, [timeframe, activeAsset]); // Recria se mudar Timeframe ou Ativo
+  }, [timeframe, activeAsset]);
 
   const handleTrade = (type: 'CALL' | 'PUT') => {
       if (isMarketLocked) return;
-
-      // SIMULAÇÃO DE RESULTADO (Apenas para testar o Stop Win/Loss)
-      const isWin = Math.random() > 0.4; // 60% chance de win simulado
+      const isWin = Math.random() > 0.4; 
       const profit = isWin ? stake * 0.95 : -stake;
-
       const newStats = {
           trades: dailyStats.trades + 1,
           wins: isWin ? dailyStats.wins + 1 : dailyStats.wins,
           losses: !isWin ? dailyStats.losses + 1 : dailyStats.losses,
           profit: dailyStats.profit + profit
       };
-
       setDailyStats(newStats);
       setBalance(prev => prev + profit);
-
-      // Feedback visual
-      const msg = isWin ? `WIN! +${formatCurrency(stake * 0.95)}` : `LOSS! -${formatCurrency(stake)}`;
-      alert(`Ordem ${type} em ${activeAsset.name}\nResultado: ${msg}`);
   };
 
-  const getDirectionColor = (dir: string) => {
-    if (dir === 'CALL') return 'text-green-600';
-    if (dir === 'PUT') return 'text-red-600';
-    return 'text-slate-400';
-  };
-  
-  const getProbabilityColor = (prob: number) => {
-    if (prob >= 80) return 'bg-green-600 text-white';
-    if (prob >= 70) return 'bg-blue-600 text-white';
-    return 'bg-slate-200 text-slate-500';
+  const getAssetIcon = (type: string) => {
+    switch(type) {
+      case 'crypto': return <Bitcoin className="h-5 w-5 text-orange-500" />;
+      case 'forex': return <Globe className="h-5 w-5 text-blue-500" />;
+      case 'commodities': return <Box className="h-5 w-5 text-yellow-500" />;
+      default: return <Activity className="h-5 w-5 text-purple-500" />;
+    }
   };
 
-  // SVG Chart rendering
+  // --- RENDERIZADOR DE GRÁFICO (DARK THEME) ---
   const renderChart = () => {
-    if (candles.length === 0) return <div className="h-full flex items-center justify-center text-slate-400">Carregando dados do ativo...</div>;
+    if (candles.length === 0) return <div className="h-full flex items-center justify-center text-slate-500">Carregando mercado...</div>;
     const minPrice = Math.min(...candles.map(c => c.low));
     const maxPrice = Math.max(...candles.map(c => c.high));
     const priceRange = maxPrice - minPrice || 1;
-    const width = 800; const height = 300; const padding = 40; const usableHeight = height - (padding * 2);
-    const candleWidth = (width / candles.length) * 0.6;
+    const width = 800; const height = 350; const padding = 40; const usableHeight = height - (padding * 2);
+    const candleWidth = (width / candles.length) * 0.7;
     const spacing = (width / candles.length);
-
-    // Formatter específico para o gráfico
     const formatPrice = (p: number) => p.toFixed(activeAsset.decimals);
 
     return (
-      <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} className="overflow-visible preserve-3d">
-        {/* Linha Central de Grid */}
-        <line x1="0" y1={height/2} x2={width} y2={height/2} stroke="#f1f5f9" strokeDasharray="4" />
-        
-        {/* Candles */}
+      <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} className="overflow-visible preserve-3d bg-[#0f172a] rounded-lg">
+        {/* Grid Background */}
+        <defs>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" strokeWidth="1"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
         {candles.map((candle, index) => {
           const normalizeY = (val: number) => height - padding - ((val - minPrice) / priceRange) * usableHeight;
           const yOpen = normalizeY(candle.open); const yClose = normalizeY(candle.close);
           const yHigh = normalizeY(candle.high); const yLow = normalizeY(candle.low);
           const isGreen = candle.close >= candle.open;
-          const color = isGreen ? '#10b981' : '#ef4444';
+          const color = isGreen ? '#22c55e' : '#ef4444'; // Green-500 / Red-500
           const x = index * spacing + (spacing - candleWidth) / 2;
           const bodyHeight = Math.max(1, Math.abs(yClose - yOpen));
           
           return (
             <g key={candle.time}>
-              <line x1={x + candleWidth/2} y1={yHigh} x2={x + candleWidth/2} y2={yLow} stroke={color} strokeWidth="1.5" />
-              <rect x={x} y={Math.min(yOpen, yClose)} width={candleWidth} height={bodyHeight} fill={color} rx="1" />
+              <line x1={x + candleWidth/2} y1={yHigh} x2={x + candleWidth/2} y2={yLow} stroke={color} strokeWidth="1" opacity="0.8" />
+              <rect x={x} y={Math.min(yOpen, yClose)} width={candleWidth} height={bodyHeight} fill={color} rx="1" stroke={color} strokeWidth="0.5" />
             </g>
           );
         })}
         
         {/* Linha de Preço Atual */}
-        <line x1="0" y1={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} x2={width} y2={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} stroke="#3b82f6" strokeWidth="1" strokeDasharray="4" />
-        
-        {/* Etiqueta de Preço */}
-        <text x={width + 5} y={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} fill="#3b82f6" fontSize="12" alignmentBaseline="middle">
+        <line x1="0" y1={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} x2={width} y2={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} stroke="#3b82f6" strokeWidth="1" strokeDasharray="4" opacity="0.8" />
+        <rect x={width - 60} y={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight - 10} width="60" height="20" fill="#3b82f6" rx="2" />
+        <text x={width - 30} y={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} fill="white" fontSize="11" fontWeight="bold" textAnchor="middle" alignmentBaseline="middle">
             {formatPrice(currentPrice)}
         </text>
       </svg>
@@ -231,212 +195,255 @@ export function DashboardView() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          {/* SELETOR DE ATIVOS */}
-          <div className="relative group min-w-[280px]">
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-              {activeAsset.type === 'crypto' ? <Bitcoin className="h-6 w-6 text-orange-500" /> : 
-               activeAsset.type === 'forex' ? <Globe className="h-6 w-6 text-blue-500" /> :
-               <Activity className="h-6 w-6 text-purple-500" />}
-            </div>
-            <select 
-              value={activeAsset.id}
-              onChange={(e) => setActiveAsset(AVAILABLE_ASSETS.find(a => a.id === e.target.value) || AVAILABLE_ASSETS[0])}
-              className="w-full appearance-none bg-slate-900 text-white text-xl font-bold py-3 pl-12 pr-10 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors"
-            >
-              <optgroup label="Forex (Moedas)">
-                {AVAILABLE_ASSETS.filter(a => a.type === 'forex').map(asset => (
-                  <option key={asset.id} value={asset.id}>{asset.name}</option>
-                ))}
-              </optgroup>
-              <optgroup label="Criptomoedas">
-                {AVAILABLE_ASSETS.filter(a => a.type === 'crypto').map(asset => (
-                  <option key={asset.id} value={asset.id}>{asset.name}</option>
-                ))}
-              </optgroup>
-              <optgroup label="Sintéticos 24/7">
-                {AVAILABLE_ASSETS.filter(a => a.type === 'synthetic').map(asset => (
-                  <option key={asset.id} value={asset.id}>{asset.name}</option>
-                ))}
-              </optgroup>
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-6 w-6 text-slate-400 pointer-events-none" />
-          </div>
-
-          <div className="flex items-center gap-2 text-slate-500">
-            <span className="flex items-center text-green-600 text-xs font-bold uppercase tracking-wider bg-green-100 px-2 py-0.5 rounded">
-              Modo Sniper Ativo
-            </span>
-          </div>
-        </div>
+    <div className="space-y-6 animate-in fade-in duration-500">
+      {/* --- HUD HEADER --- */}
+      <div className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
         
-        {/* Painel de Metas Diárias */}
-        <div className="flex gap-4">
-             <Card className="bg-slate-900 text-white border-slate-800 w-40">
-                <CardContent className="p-3 text-center">
-                    <p className="text-[10px] text-slate-400 uppercase font-bold">Meta Diária</p>
-                    <div className="flex justify-center items-baseline gap-1">
-                        <span className={dailyStats.profit >= 0 ? "text-green-400 font-bold" : "text-red-400 font-bold"}>
-                            {formatCurrency(dailyStats.profit)}
-                        </span>
-                        <span className="text-[10px] text-slate-500">/ {formatCurrency(RISK_CONFIG.stopWin)}</span>
-                    </div>
-                    {/* Barra de Progresso */}
-                    <div className="w-full bg-slate-800 h-1 mt-1 rounded-full overflow-hidden">
-                        <div 
-                            className="bg-green-500 h-full transition-all duration-500" 
-                            style={{ width: `${Math.min((dailyStats.profit / RISK_CONFIG.stopWin) * 100, 100)}%` }}
-                        />
-                    </div>
-                </CardContent>
-             </Card>
+        {/* ASSET SELECTOR */}
+        <div className="relative group w-full lg:w-auto min-w-[300px]">
+          <label className="text-[10px] uppercase font-bold text-slate-400 absolute -top-2 left-2 bg-white px-1">Ativo Selecionado</label>
+          <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            {getAssetIcon(activeAsset.type)}
+          </div>
+          <select 
+            value={activeAsset.id}
+            onChange={(e) => setActiveAsset(AVAILABLE_ASSETS.find(a => a.id === e.target.value) || AVAILABLE_ASSETS[0])}
+            className="w-full appearance-none bg-slate-50 text-slate-900 text-lg font-bold py-3 pl-12 pr-10 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all shadow-inner"
+          >
+            {['Derived Indices', 'Forex Majors', 'Commodities', 'Cryptocurrencies'].map(group => (
+              <optgroup key={group} label={group}>
+                {AVAILABLE_ASSETS.filter(a => a.group === group).map(asset => (
+                  <option key={asset.id} value={asset.id}>{asset.name}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
+        </div>
 
-             <Card className="bg-white border-slate-200 w-32">
-                <CardContent className="p-3 text-center">
-                    <p className="text-[10px] text-slate-500 uppercase font-bold">Trades</p>
-                    <p className={`font-bold ${dailyStats.trades >= RISK_CONFIG.maxTrades ? 'text-red-600' : 'text-slate-900'}`}>
-                        {dailyStats.trades} <span className="text-slate-400 text-xs">/ {RISK_CONFIG.maxTrades}</span>
+        {/* RISK STATS HUD */}
+        <div className="flex items-center gap-2 bg-slate-900 text-white p-1 rounded-lg shadow-md">
+            <div className="px-4 py-1 border-r border-slate-700">
+                <p className="text-[9px] uppercase text-slate-400 font-bold">Saldo Demo</p>
+                <p className="text-sm font-bold text-green-400">{formatCurrency(balance)}</p>
+            </div>
+            <div className="px-4 py-1 border-r border-slate-700">
+                <p className="text-[9px] uppercase text-slate-400 font-bold">Meta do Dia</p>
+                <div className="flex items-center gap-2">
+                    <p className={`text-sm font-bold ${dailyStats.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {formatCurrency(dailyStats.profit)}
                     </p>
-                </CardContent>
-             </Card>
+                    <span className="text-[10px] text-slate-500">/ {formatCurrency(RISK_CONFIG.stopWin)}</span>
+                </div>
+            </div>
+            <div className="px-4 py-1">
+                <p className="text-[9px] uppercase text-slate-400 font-bold">Trades</p>
+                <div className="flex items-center gap-1">
+                    <p className={`text-sm font-bold ${dailyStats.trades >= RISK_CONFIG.maxTrades ? 'text-red-500' : 'text-white'}`}>
+                        {dailyStats.trades}
+                    </p>
+                    <span className="text-[10px] text-slate-500">/ {RISK_CONFIG.maxTrades}</span>
+                </div>
+            </div>
         </div>
       </div>
 
       {isMarketLocked && (
-          <div className="bg-slate-900 text-white p-4 rounded-lg flex items-center justify-between border-l-4 border-red-500 shadow-lg">
+          <div className="bg-red-50 text-red-900 p-4 rounded-lg flex items-center justify-between border border-red-200 shadow-sm animate-pulse">
               <div className="flex items-center gap-3">
-                  <ShieldAlert className="h-6 w-6 text-red-500" />
+                  <ShieldAlert className="h-6 w-6 text-red-600" />
                   <div>
                       <h4 className="font-bold">Gerenciamento de Risco Ativado</h4>
-                      <p className="text-sm text-slate-300">Você atingiu seu limite diário (Trades, Stop Win ou Stop Loss). Volte amanhã.</p>
+                      <p className="text-sm opacity-90">Meta atingida ou limite de perdas alcançado. Respeite seu gerenciamento.</p>
                   </div>
               </div>
-              <Button variant="secondary" size="sm" onClick={() => window.location.reload()}>Reiniciar Demo</Button>
+              <Button variant="secondary" size="sm" onClick={() => window.location.reload()} className="bg-white border hover:bg-red-50">Reiniciar Demo</Button>
           </div>
       )}
 
-      <div className="grid grid-cols-12 gap-6">
-        <div className="col-span-12 lg:col-span-8 space-y-4">
-          <Card className="h-[400px] flex flex-col">
-            <CardHeader className="flex flex-row items-center justify-between pb-2 border-b">
-              <CardTitle className="text-sm font-medium text-slate-500">Gráfico {activeAsset.name}</CardTitle>
-              <div className="flex gap-2">
+      <div className="grid grid-cols-12 gap-6 h-[calc(100vh-220px)]">
+        {/* --- COLUNA PRINCIPAL (GRÁFICO) --- */}
+        <div className="col-span-12 lg:col-span-9 flex flex-col gap-4 h-full">
+          <Card className="flex-1 flex flex-col bg-white border-slate-200 shadow-md overflow-hidden">
+            <div className="flex flex-row items-center justify-between p-4 border-b bg-slate-50">
+              <div className="flex items-center gap-2">
+                <BarChart3 className="h-5 w-5 text-slate-500" />
+                <span className="font-bold text-slate-700">Análise Gráfica</span>
+              </div>
+              <div className="flex bg-white rounded-md border border-slate-200 p-1">
                 {['M1', 'M5', 'M15'].map((tf) => (
-                  <button key={tf} onClick={() => setTimeframe(tf)} className={`px-3 py-1 text-xs font-bold rounded-md ${timeframe === tf ? 'bg-slate-900 text-white' : 'bg-slate-100'}`}>{tf}</button>
+                  <button 
+                    key={tf} 
+                    onClick={() => setTimeframe(tf)} 
+                    className={cn(
+                        "px-3 py-1 text-xs font-bold rounded transition-colors",
+                        timeframe === tf ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100"
+                    )}
+                  >
+                    {tf}
+                  </button>
                 ))}
               </div>
-            </CardHeader>
-            <CardContent className="flex-1 p-4">{renderChart()}</CardContent>
+            </div>
+            <div className="flex-1 bg-slate-950 p-4 relative">
+                {renderChart()}
+                <div className="absolute top-6 left-6 flex items-center gap-2 px-3 py-1 bg-slate-800/80 rounded backdrop-blur-sm text-xs text-white border border-slate-700">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                    Mercado Aberto
+                </div>
+            </div>
           </Card>
 
-          {/* Análise Sniper */}
-          <Card className={`border-l-4 min-h-[180px] transition-colors ${analysis?.isSniperReady ? (analysis.direction === 'CALL' ? 'border-l-green-500' : 'border-l-red-500') : 'border-l-slate-200'}`}>
+          {/* --- PAINEL DE SINAL (SNIPER) --- */}
+          <Card className={cn(
+              "border-l-4 shadow-md transition-all h-[200px]",
+              analysis?.isSniperReady 
+                ? (analysis.direction === 'CALL' ? 'border-l-green-500 bg-green-50/50' : 'border-l-red-500 bg-red-50/50') 
+                : 'border-l-slate-300 bg-white'
+          )}>
             <CardHeader className="pb-2">
               <div className="flex justify-between items-start">
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Zap className={`h-5 w-5 ${analysis?.isSniperReady ? 'text-yellow-500' : 'text-slate-300'}`} />
-                    Análise Sniper IA
-                  </CardTitle>
-                  <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded">
-                      <Clock className="h-3 w-3" />
-                      <span>Sinal para: <strong>Próxima Vela</strong></span>
+                  <div className="flex items-center gap-2">
+                    <div className={cn("p-2 rounded-lg", analysis?.isSniperReady ? "bg-yellow-100 text-yellow-700" : "bg-slate-100 text-slate-400")}>
+                        <Zap className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <CardTitle className="text-base font-bold">Sniper IA</CardTitle>
+                        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Engine v2.0</p>
+                    </div>
                   </div>
+                  {analysis?.isSniperReady && (
+                      <div className="flex items-center gap-1 text-xs font-bold text-white bg-slate-900 px-3 py-1 rounded-full shadow-lg animate-bounce">
+                          <Target className="h-3 w-3" />
+                          ENTRADA CONFIRMADA
+                      </div>
+                  )}
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-2">
               {analysis ? (
-                <div className="flex items-start justify-between">
-                  <div className="space-y-4">
-                    <div>
-                      <p className="text-xs text-slate-500 mb-1 font-bold uppercase tracking-wider">Direção Confirmada</p>
-                      <div className="flex items-center gap-2">
-                        {analysis.direction === 'CALL' && <TrendingUp className="h-8 w-8 text-green-600" />}
-                        {analysis.direction === 'PUT' && <TrendingDown className="h-8 w-8 text-red-600" />}
-                        {analysis.direction === 'NEUTRO' && <Lock className="h-8 w-8 text-slate-300" />}
-                        <span className={`text-4xl font-black tracking-tighter ${getDirectionColor(analysis.direction)}`}>
+                <div className="flex items-center justify-between gap-8">
+                  {/* Direção */}
+                  <div className="flex flex-col items-center min-w-[120px]">
+                      <span className="text-[10px] font-bold uppercase text-slate-400 mb-1">Direção</span>
+                      <div className={cn(
+                          "text-4xl font-black tracking-tighter flex items-center gap-1",
+                          analysis.direction === 'CALL' ? 'text-green-600 drop-shadow-sm' : 
+                          analysis.direction === 'PUT' ? 'text-red-600 drop-shadow-sm' : 'text-slate-300'
+                      )}>
+                          {analysis.direction === 'CALL' && <TrendingUp className="h-8 w-8" />}
+                          {analysis.direction === 'PUT' && <TrendingDown className="h-8 w-8" />}
+                          {analysis.direction === 'NEUTRO' && <Lock className="h-8 w-8" />}
                           {analysis.direction}
-                        </span>
                       </div>
-                    </div>
-                    
-                    <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-bold shadow-sm ${getProbabilityColor(analysis.probability)}`}>
-                        {analysis.probability}% Probabilidade
-                    </div>
                   </div>
 
-                  <div className="flex-1 ml-12 border-l pl-6 space-y-2 max-h-[140px] overflow-y-auto">
-                    <div className="flex justify-between items-center mb-2">
-                        <p className="text-xs font-semibold text-slate-400 uppercase">Filtros de Entrada</p>
-                    </div>
+                  {/* Probabilidade */}
+                  <div className="flex flex-col items-center">
+                      <span className="text-[10px] font-bold uppercase text-slate-400 mb-2">Assertividade</span>
+                      <div className="relative h-16 w-16 flex items-center justify-center">
+                          <svg className="absolute top-0 left-0 w-full h-full transform -rotate-90">
+                              <circle cx="32" cy="32" r="28" stroke="#e2e8f0" strokeWidth="6" fill="none" />
+                              <circle 
+                                cx="32" cy="32" r="28" stroke={analysis.probability >= 80 ? "#22c55e" : "#3b82f6"} strokeWidth="6" fill="none" 
+                                strokeDasharray={175} strokeDashoffset={175 - (175 * analysis.probability) / 100}
+                                className="transition-all duration-1000 ease-out"
+                              />
+                          </svg>
+                          <span className="text-sm font-bold text-slate-700">{analysis.probability}%</span>
+                      </div>
+                  </div>
+
+                  {/* Lista de Fatores */}
+                  <div className="flex-1 h-[100px] overflow-y-auto pr-2 border-l pl-6 space-y-2">
+                    <span className="text-[10px] font-bold uppercase text-slate-400 sticky top-0 bg-inherit">Confluências</span>
                     {analysis.factors.map((factor, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-sm">
-                        <div className={`w-2 h-2 rounded-full ${factor.status === 'POSITIVE' ? 'bg-green-500' : factor.status === 'NEGATIVE' ? 'bg-red-500' : 'bg-slate-300'}`} />
-                        <span className="text-slate-700 font-medium">{factor.label}</span>
+                      <div key={idx} className="flex items-center gap-2 text-xs border-b border-slate-100 pb-1 last:border-0">
+                        <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", 
+                            factor.status === 'POSITIVE' ? 'bg-green-500 shadow-[0_0_5px_rgba(34,197,94,0.5)]' : 
+                            factor.status === 'NEGATIVE' ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : 'bg-slate-300'
+                        )} />
+                        <span className="text-slate-600 font-medium leading-tight">{factor.label}</span>
                       </div>
                     ))}
                     {!analysis.isSniperReady && (
-                        <p className="text-xs text-orange-500 font-medium mt-2 bg-orange-50 p-2 rounded border border-orange-100">
-                            ⚠️ Aguardando oportunidade de alta probabilidade...
+                        <p className="text-xs text-orange-600 font-bold mt-2 flex items-center gap-1">
+                            <Clock className="h-3 w-3" /> Aguardando gatilho...
                         </p>
                     )}
                   </div>
                 </div>
-              ) : <div className="animate-pulse text-slate-400">Carregando dados de {activeAsset.name}...</div>}
+              ) : <div className="text-center py-8 text-slate-400">Carregando IA...</div>}
             </CardContent>
           </Card>
         </div>
 
-        <div className="col-span-12 lg:col-span-4 space-y-4">
-          <Card className="bg-white shadow-lg border-slate-200 h-full flex flex-col relative overflow-hidden">
-            {isMarketLocked && <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px] z-50 flex items-center justify-center text-white font-bold text-lg cursor-not-allowed">Painel Bloqueado</div>}
-            
-            <CardHeader className="bg-slate-50 border-b">
-              <CardTitle className="text-base flex items-center gap-2">
-                <DollarSign className="h-5 w-5 text-green-600" />
-                Painel de Execução
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 flex flex-col justify-between pt-6">
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-600">Entrada Fixa</label>
-                  <div className="relative">
-                    <DollarSign className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <input type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} className="w-full pl-9 h-10 rounded-md border border-slate-300 font-mono font-bold text-lg" />
-                  </div>
-                </div>
+        {/* --- COLUNA LATERAL (EXECUÇÃO) --- */}
+        <div className="col-span-12 lg:col-span-3 h-full">
+          <Card className="h-full flex flex-col bg-white shadow-lg border-slate-200 relative overflow-hidden">
+             {isMarketLocked && <div className="absolute inset-0 bg-slate-900/80 z-20 flex flex-col items-center justify-center text-white text-center p-4">
+                 <ShieldAlert className="h-12 w-12 text-red-500 mb-2" />
+                 <h3 className="font-bold text-lg">Bloqueado</h3>
+                 <p className="text-sm text-slate-300">Volte amanhã Sniper.</p>
+             </div>}
 
-                <div className="bg-green-50 p-4 rounded-lg border border-green-100">
-                    <div className="flex justify-between">
-                        <span className="text-xs text-green-700 font-bold uppercase">Payout</span>
-                        <span className="text-xs font-bold text-green-700">95%</span>
+             <div className="p-4 bg-slate-900 text-white text-center">
+                 <h3 className="font-bold text-sm uppercase tracking-wider flex items-center justify-center gap-2">
+                     <Layers className="h-4 w-4 text-green-400" /> Ordem Rápida
+                 </h3>
+             </div>
+
+             <CardContent className="flex-1 flex flex-col p-6 gap-6">
+                <div className="space-y-4">
+                    <label className="text-xs font-bold text-slate-500 uppercase">Valor da Entrada</label>
+                    <div className="relative group">
+                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-green-600 transition-colors" />
+                        <input 
+                            type="number" 
+                            value={stake} 
+                            onChange={(e) => setStake(Number(e.target.value))} 
+                            className="w-full h-14 pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-2xl font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all"
+                        />
                     </div>
-                    <div className="text-2xl font-black text-green-800">+{formatCurrency(stake * 0.95)}</div>
+                    <div className="flex justify-between text-xs font-medium text-slate-400 px-1">
+                        <span>Min: $0.35</span>
+                        <span>Payout: <span className="text-green-600 font-bold">95%</span></span>
+                    </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3 mt-8">
-                <Button 
-                    variant="success" 
-                    className={`h-16 text-lg font-bold flex flex-col leading-tight ${analysis?.direction !== 'CALL' ? 'opacity-50 grayscale' : ''}`}
-                    onClick={() => handleTrade('CALL')}
-                    disabled={isMarketLocked}
-                >
-                    <span className="flex items-center gap-1">CALL <TrendingUp className="h-4 w-4" /></span>
-                </Button>
-                <Button 
-                    variant="danger" 
-                    className={`h-16 text-lg font-bold flex flex-col leading-tight ${analysis?.direction !== 'PUT' ? 'opacity-50 grayscale' : ''}`}
-                    onClick={() => handleTrade('PUT')}
-                    disabled={isMarketLocked}
-                >
-                    <span className="flex items-center gap-1">PUT <TrendingDown className="h-4 w-4" /></span>
-                </Button>
-              </div>
-              <p className="text-xs text-center text-slate-400 mt-2">Botões destacados apenas se alinhados com a IA.</p>
-            </CardContent>
+                <div className="bg-green-50 border border-green-100 p-4 rounded-xl text-center space-y-1">
+                    <span className="text-xs font-bold text-green-700 uppercase">Lucro Previsto</span>
+                    <div className="text-3xl font-black text-green-600 tracking-tight">+{formatCurrency(stake * 0.95)}</div>
+                </div>
+
+                <div className="flex-1 grid grid-rows-2 gap-3 mt-4">
+                    <Button 
+                        className={cn(
+                            "h-full text-xl font-black flex flex-col items-center justify-center gap-1 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-[0.98]",
+                            analysis?.direction === 'CALL' 
+                                ? "bg-green-600 hover:bg-green-500 text-white ring-4 ring-green-100" 
+                                : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                        )}
+                        onClick={() => handleTrade('CALL')}
+                        disabled={isMarketLocked}
+                    >
+                        <span className="flex items-center gap-2">CALL <TrendingUp className="h-5 w-5" /></span>
+                    </Button>
+
+                    <Button 
+                        className={cn(
+                            "h-full text-xl font-black flex flex-col items-center justify-center gap-1 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-[0.98]",
+                            analysis?.direction === 'PUT' 
+                                ? "bg-red-600 hover:bg-red-500 text-white ring-4 ring-red-100" 
+                                : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                        )}
+                        onClick={() => handleTrade('PUT')}
+                        disabled={isMarketLocked}
+                    >
+                        <span className="flex items-center gap-2">PUT <TrendingDown className="h-5 w-5" /></span>
+                    </Button>
+                </div>
+             </CardContent>
           </Card>
         </div>
       </div>
