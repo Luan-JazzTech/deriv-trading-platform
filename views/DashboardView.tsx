@@ -2,17 +2,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, CheckCircle2, XCircle, AlertTriangle, PlayCircle, Zap, Clock, ShieldAlert, ChevronDown } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, CheckCircle2, XCircle, AlertTriangle, PlayCircle, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 
-// Configuração dos Ativos Disponíveis
+// Configuração dos Ativos Disponíveis (Forex, Cripto e Sintéticos)
 const AVAILABLE_ASSETS = [
-  { id: 'R_100', name: 'Volatility 100 (1s) Index', basePrice: 1240.50, volatility: 2.0 },
-  { id: 'R_75', name: 'Volatility 75 (1s) Index', basePrice: 450.25, volatility: 1.5 },
-  { id: 'R_50', name: 'Volatility 50 (1s) Index', basePrice: 320.10, volatility: 1.2 },
-  { id: 'R_25', name: 'Volatility 25 (1s) Index', basePrice: 890.00, volatility: 1.0 },
-  { id: 'R_10', name: 'Volatility 10 (1s) Index', basePrice: 1500.50, volatility: 0.8 },
+  // Sintéticos (24/7)
+  { id: 'R_100', name: 'Volatility 100 (1s)', basePrice: 1240.50, volatility: 2.0, type: 'synthetic', decimals: 2 },
+  { id: 'R_75', name: 'Volatility 75 (1s)', basePrice: 450.25, volatility: 1.5, type: 'synthetic', decimals: 2 },
+  
+  // Forex (Seg-Sex)
+  { id: 'frxEURUSD', name: 'EUR/USD', basePrice: 1.0850, volatility: 0.00015, type: 'forex', decimals: 5 },
+  { id: 'frxGBPUSD', name: 'GBP/USD', basePrice: 1.2730, volatility: 0.00020, type: 'forex', decimals: 5 },
+  { id: 'frxUSDJPY', name: 'USD/JPY', basePrice: 155.40, volatility: 0.05, type: 'forex', decimals: 3 },
+
+  // Cripto (24/7)
+  { id: 'cryBTCUSD', name: 'BTC/USD', basePrice: 64250.00, volatility: 45.0, type: 'crypto', decimals: 2 },
+  { id: 'cryETHUSD', name: 'ETH/USD', basePrice: 3450.00, volatility: 5.0, type: 'crypto', decimals: 2 },
 ];
 
 export function DashboardView() {
@@ -73,14 +80,23 @@ export function DashboardView() {
 
     for (let i = 60; i > 0; i--) {
       const open = price;
-      const move = (Math.random() - 0.5) * 5 * volatilityMultiplier;
+      // Ajuste fino para evitar movimentos irreais em Forex
+      const rawMove = (Math.random() - 0.5) * 5; 
+      const move = rawMove * volatilityMultiplier;
+      
       const close = price + move;
       
+      // Criar High e Low baseados no Open/Close
+      const bodyMax = Math.max(open, close);
+      const bodyMin = Math.min(open, close);
+      const high = bodyMax + (Math.random() * volatilityMultiplier * 0.5);
+      const low = bodyMin - (Math.random() * volatilityMultiplier * 0.5);
+
       initialCandles.push({
         time: now - (i * candleDuration),
         open,
-        high: Math.max(open, close) + Math.random(),
-        low: Math.min(open, close) - Math.random(),
+        high,
+        low,
         close
       });
       price = close;
@@ -167,7 +183,7 @@ export function DashboardView() {
     return 'bg-slate-200 text-slate-500';
   };
 
-  // SVG Chart rendering (mesmo código anterior, simplificado aqui)
+  // SVG Chart rendering
   const renderChart = () => {
     if (candles.length === 0) return <div className="h-full flex items-center justify-center text-slate-400">Carregando dados do ativo...</div>;
     const minPrice = Math.min(...candles.map(c => c.low));
@@ -177,9 +193,15 @@ export function DashboardView() {
     const candleWidth = (width / candles.length) * 0.6;
     const spacing = (width / candles.length);
 
+    // Formatter específico para o gráfico
+    const formatPrice = (p: number) => p.toFixed(activeAsset.decimals);
+
     return (
       <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} className="overflow-visible preserve-3d">
+        {/* Linha Central de Grid */}
         <line x1="0" y1={height/2} x2={width} y2={height/2} stroke="#f1f5f9" strokeDasharray="4" />
+        
+        {/* Candles */}
         {candles.map((candle, index) => {
           const normalizeY = (val: number) => height - padding - ((val - minPrice) / priceRange) * usableHeight;
           const yOpen = normalizeY(candle.open); const yClose = normalizeY(candle.close);
@@ -196,7 +218,14 @@ export function DashboardView() {
             </g>
           );
         })}
+        
+        {/* Linha de Preço Atual */}
         <line x1="0" y1={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} x2={width} y2={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} stroke="#3b82f6" strokeWidth="1" strokeDasharray="4" />
+        
+        {/* Etiqueta de Preço */}
+        <text x={width + 5} y={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} fill="#3b82f6" fontSize="12" alignmentBaseline="middle">
+            {formatPrice(currentPrice)}
+        </text>
       </svg>
     );
   };
@@ -206,15 +235,32 @@ export function DashboardView() {
       <div className="flex justify-between items-center">
         <div className="flex items-center gap-4">
           {/* SELETOR DE ATIVOS */}
-          <div className="relative group">
+          <div className="relative group min-w-[280px]">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              {activeAsset.type === 'crypto' ? <Bitcoin className="h-6 w-6 text-orange-500" /> : 
+               activeAsset.type === 'forex' ? <Globe className="h-6 w-6 text-blue-500" /> :
+               <Activity className="h-6 w-6 text-purple-500" />}
+            </div>
             <select 
               value={activeAsset.id}
               onChange={(e) => setActiveAsset(AVAILABLE_ASSETS.find(a => a.id === e.target.value) || AVAILABLE_ASSETS[0])}
-              className="appearance-none bg-slate-900 text-white text-2xl font-bold py-2 pl-4 pr-10 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors"
+              className="w-full appearance-none bg-slate-900 text-white text-xl font-bold py-3 pl-12 pr-10 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors"
             >
-              {AVAILABLE_ASSETS.map(asset => (
-                <option key={asset.id} value={asset.id}>{asset.name}</option>
-              ))}
+              <optgroup label="Forex (Moedas)">
+                {AVAILABLE_ASSETS.filter(a => a.type === 'forex').map(asset => (
+                  <option key={asset.id} value={asset.id}>{asset.name}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Criptomoedas">
+                {AVAILABLE_ASSETS.filter(a => a.type === 'crypto').map(asset => (
+                  <option key={asset.id} value={asset.id}>{asset.name}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Sintéticos 24/7">
+                {AVAILABLE_ASSETS.filter(a => a.type === 'synthetic').map(asset => (
+                  <option key={asset.id} value={asset.id}>{asset.name}</option>
+                ))}
+              </optgroup>
             </select>
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-6 w-6 text-slate-400 pointer-events-none" />
           </div>
