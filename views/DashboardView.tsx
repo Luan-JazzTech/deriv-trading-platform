@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, Settings2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, Settings2, CalendarClock, Timer } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 
@@ -70,9 +70,7 @@ export function DashboardView() {
 
   // --- GERENCIAMENTO DE RISCO SNIPER ---
   const [dailyStats, setDailyStats] = useState({ trades: 0, wins: 0, losses: 0, profit: 0 });
-  const RISK_CONFIG = { maxTrades: 3, stopWin: 50.00, stopLoss: -30.00 };
-  const isMarketLocked = dailyStats.trades >= RISK_CONFIG.maxTrades || dailyStats.profit >= RISK_CONFIG.stopWin || dailyStats.profit <= RISK_CONFIG.stopLoss;
-
+  
   // --- MODO AUTOMÁTICO (BOT) ---
   const [executionMode, setExecutionMode] = useState<'MANUAL' | 'AUTO'>('MANUAL');
   const [isAutoRunning, setIsAutoRunning] = useState(false);
@@ -80,10 +78,22 @@ export function DashboardView() {
       stake: 5.0,
       maxTrades: 5,
       stopWin: 20.0,
-      stopLoss: 15.0
+      stopLoss: 15.0,
+      scheduleEnabled: false,
+      startTime: '09:00',
+      endTime: '17:00'
   });
-  const lastAutoTradeTimestamp = useRef<number>(0);
+  const [botStatus, setBotStatus] = useState<'IDLE' | 'RUNNING' | 'WAITING_SCHEDULE' | 'STOPPED_BY_RISK'>('IDLE');
+  
+  // Configuração Global Manual
+  const RISK_CONFIG = { maxTrades: 10, stopWin: 100.00, stopLoss: -50.00 };
+  const isManualLocked = dailyStats.trades >= RISK_CONFIG.maxTrades || dailyStats.profit >= RISK_CONFIG.stopWin || dailyStats.profit <= RISK_CONFIG.stopLoss;
 
+  const isAutoLocked = dailyStats.trades >= autoSettings.maxTrades || 
+                       dailyStats.profit >= autoSettings.stopWin || 
+                       dailyStats.profit <= -Math.abs(autoSettings.stopLoss);
+
+  const lastAutoTradeTimestamp = useRef<number>(0);
   const lastCandleCreationRef = useRef<number>(Date.now());
 
   // Simulação de Mercado
@@ -156,33 +166,54 @@ export function DashboardView() {
 
   // --- LÓGICA DO BOT AUTOMÁTICO ---
   useEffect(() => {
-      if (!isAutoRunning || executionMode !== 'AUTO' || !analysis || !analysis.isSniperReady) return;
-
-      // 1. Evitar entrar no mesmo sinal repetidamente (Debounce por Timestamp da Análise)
-      if (analysis.timestamp <= lastAutoTradeTimestamp.current) return;
-
-      // 2. Verificar Travas de Segurança (Risco Global + Config do Bot)
-      if (isMarketLocked) {
-          setIsAutoRunning(false);
+      // 0. Verifica se o bot deve estar rodando
+      if (!isAutoRunning || executionMode !== 'AUTO') {
+          setBotStatus('IDLE');
           return;
       }
-      
-      // Limites específicos do Auto Mode
-      if (dailyStats.trades >= autoSettings.maxTrades) { setIsAutoRunning(false); return; }
-      if (dailyStats.profit >= autoSettings.stopWin) { setIsAutoRunning(false); return; }
-      if (dailyStats.profit <= -Math.abs(autoSettings.stopLoss)) { setIsAutoRunning(false); return; }
 
-      // 3. Executar Trade
-      if (analysis.direction === 'CALL' || analysis.direction === 'PUT') {
-          handleTrade(analysis.direction, autoSettings.stake);
-          lastAutoTradeTimestamp.current = analysis.timestamp;
+      // 1. Verifica Agendamento
+      if (autoSettings.scheduleEnabled) {
+          const now = new Date();
+          const [startHour, startMin] = autoSettings.startTime.split(':').map(Number);
+          const [endHour, endMin] = autoSettings.endTime.split(':').map(Number);
+          
+          const start = new Date(now).setHours(startHour, startMin, 0, 0);
+          const end = new Date(now).setHours(endHour, endMin, 0, 0);
+          const current = now.getTime();
+
+          if (current < start || current > end) {
+              setBotStatus('WAITING_SCHEDULE');
+              return;
+          }
       }
 
-  }, [analysis, isAutoRunning, executionMode, dailyStats, autoSettings, isMarketLocked]);
+      // 2. Verifica Travas de Segurança (Risk Management)
+      if (isAutoLocked) {
+          setBotStatus('STOPPED_BY_RISK');
+          return;
+      }
+
+      setBotStatus('RUNNING');
+
+      // 3. Executar Trade (se houver sinal e não estiver travado)
+      if (analysis && analysis.isSniperReady) {
+          // Evitar entrar no mesmo sinal repetidamente
+          if (analysis.timestamp <= lastAutoTradeTimestamp.current) return;
+
+          if (analysis.direction === 'CALL' || analysis.direction === 'PUT') {
+              handleTrade(analysis.direction, autoSettings.stake);
+              lastAutoTradeTimestamp.current = analysis.timestamp;
+          }
+      }
+
+  }, [analysis, isAutoRunning, executionMode, dailyStats, autoSettings, isAutoLocked]);
 
 
   const handleTrade = (type: 'CALL' | 'PUT', tradeStake = stake) => {
-      if (isMarketLocked) return;
+      // Manual mode lock check
+      if (executionMode === 'MANUAL' && isManualLocked) return;
+
       const isWin = Math.random() > 0.4; // 60% chance simulated
       const profit = isWin ? tradeStake * 0.95 : -tradeStake;
       const newStats = {
@@ -312,7 +343,7 @@ export function DashboardView() {
         </div>
       </div>
 
-      {isMarketLocked && (
+      {isManualLocked && executionMode === 'MANUAL' && (
           <div className="bg-red-950/30 text-red-200 p-4 rounded-lg flex items-center justify-between border border-red-900/50 shadow-sm animate-pulse">
               <div className="flex items-center gap-3">
                   <ShieldAlert className="h-6 w-6 text-red-500" />
@@ -449,12 +480,7 @@ export function DashboardView() {
         {/* --- COLUNA LATERAL (EXECUÇÃO COM ABAS) --- */}
         <div className="col-span-12 lg:col-span-3 h-full">
           <Card className="h-full flex flex-col bg-slate-900 shadow-xl border-slate-800 relative overflow-hidden">
-             {isMarketLocked && <div className="absolute inset-0 bg-slate-950/90 z-20 flex flex-col items-center justify-center text-white text-center p-4 backdrop-blur-sm">
-                 <ShieldAlert className="h-12 w-12 text-red-500 mb-2" />
-                 <h3 className="font-bold text-lg text-red-400">Bloqueado</h3>
-                 <p className="text-sm text-slate-400">Volte amanhã Sniper.</p>
-             </div>}
-
+             
              {/* TABS HEADER */}
              <div className="grid grid-cols-2 border-b border-slate-800">
                 <button 
@@ -513,7 +539,7 @@ export function DashboardView() {
                                         : "bg-slate-800 text-slate-500 hover:bg-slate-700 border border-slate-700"
                                 )}
                                 onClick={() => handleTrade('CALL')}
-                                disabled={isMarketLocked}
+                                disabled={isManualLocked}
                             >
                                 <span className="flex items-center gap-2">CALL <TrendingUp className="h-5 w-5" /></span>
                             </Button>
@@ -526,7 +552,7 @@ export function DashboardView() {
                                         : "bg-slate-800 text-slate-500 hover:bg-slate-700 border border-slate-700"
                                 )}
                                 onClick={() => handleTrade('PUT')}
-                                disabled={isMarketLocked}
+                                disabled={isManualLocked}
                             >
                                 <span className="flex items-center gap-2">PUT <TrendingDown className="h-5 w-5" /></span>
                             </Button>
@@ -537,14 +563,33 @@ export function DashboardView() {
                 {/* --- MODO AUTOMÁTICO --- */}
                 {executionMode === 'AUTO' && (
                     <div className="space-y-6 flex-1 flex flex-col">
-                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 text-xs text-yellow-500 mb-2">
-                            <p className="font-bold flex items-center gap-2"><ShieldAlert className="h-3 w-3" /> Aviso de Risco</p>
-                            <p className="opacity-80 mt-1">O bot opera apenas sinais de <strong>Sniper (Alta Probabilidade)</strong>. Configure seus limites com cautela.</p>
+                        <div className={cn(
+                            "border rounded-lg p-3 text-xs mb-2 transition-colors",
+                            botStatus === 'RUNNING' ? "bg-green-500/10 border-green-500/20 text-green-400" :
+                            botStatus === 'WAITING_SCHEDULE' ? "bg-blue-500/10 border-blue-500/20 text-blue-400" :
+                            botStatus === 'STOPPED_BY_RISK' ? "bg-red-500/10 border-red-500/20 text-red-400" :
+                            "bg-slate-800/50 border-slate-700 text-slate-400"
+                        )}>
+                            <p className="font-bold flex items-center gap-2">
+                                {botStatus === 'RUNNING' && <Activity className="h-3.5 w-3.5 animate-pulse" />}
+                                {botStatus === 'WAITING_SCHEDULE' && <Timer className="h-3.5 w-3.5" />}
+                                {botStatus === 'STOPPED_BY_RISK' && <ShieldAlert className="h-3.5 w-3.5" />}
+                                {botStatus === 'IDLE' && <Bot className="h-3.5 w-3.5" />}
+                                Status: 
+                                {botStatus === 'RUNNING' && " Operando Sniper"}
+                                {botStatus === 'WAITING_SCHEDULE' && " Aguardando Horário"}
+                                {botStatus === 'STOPPED_BY_RISK' && " Bloqueado por Risco"}
+                                {botStatus === 'IDLE' && " Parado"}
+                            </p>
                         </div>
 
-                        <div className="space-y-4">
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Stake Automática</label>
+                        {/* CONFIGURAÇÃO DE RISCO */}
+                        <div className="space-y-4 border-b border-slate-800 pb-4">
+                            <h4 className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                                <ShieldAlert className="h-3 w-3" /> Gestão de Risco
+                            </h4>
+                            <div className="space-y-2">
+                                <label className="text-xs text-slate-300">Risco por Operação (Stake Fixa)</label>
                                 <div className="relative">
                                     <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
                                     <input 
@@ -552,24 +597,24 @@ export function DashboardView() {
                                         value={autoSettings.stake}
                                         disabled={isAutoRunning}
                                         onChange={(e) => setAutoSettings({...autoSettings, stake: Number(e.target.value)})} 
-                                        className="w-full h-10 pl-9 pr-3 bg-slate-950 border border-slate-800 rounded-lg font-bold text-white focus:ring-yellow-500/50 focus:border-yellow-500/50 disabled:opacity-50"
+                                        className="w-full h-10 pl-9 pr-3 bg-slate-950 border border-slate-800 rounded-lg font-bold text-white focus:ring-yellow-500/50 disabled:opacity-50"
                                     />
                                 </div>
                             </div>
-                            
+
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Max Trades</label>
+                                    <label className="text-xs text-slate-300">Stop Loss Global</label>
                                     <input 
                                         type="number" 
-                                        value={autoSettings.maxTrades}
+                                        value={Math.abs(autoSettings.stopLoss)}
                                         disabled={isAutoRunning}
-                                        onChange={(e) => setAutoSettings({...autoSettings, maxTrades: Number(e.target.value)})} 
-                                        className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg font-bold text-white focus:ring-yellow-500/50 disabled:opacity-50"
+                                        onChange={(e) => setAutoSettings({...autoSettings, stopLoss: -Math.abs(Number(e.target.value))})} 
+                                        className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg font-bold text-red-400 focus:ring-yellow-500/50 disabled:opacity-50"
                                     />
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Stop Win</label>
+                                    <label className="text-xs text-slate-300">Stop Win Global</label>
                                     <input 
                                         type="number" 
                                         value={autoSettings.stopWin}
@@ -581,32 +626,70 @@ export function DashboardView() {
                             </div>
                         </div>
 
+                        {/* SCHEDULER */}
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h4 className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                                    <CalendarClock className="h-3 w-3" /> Agendamento
+                                </h4>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                  <input 
+                                    type="checkbox" 
+                                    className="sr-only peer"
+                                    checked={autoSettings.scheduleEnabled}
+                                    onChange={(e) => setAutoSettings({...autoSettings, scheduleEnabled: e.target.checked})}
+                                    disabled={isAutoRunning}
+                                  />
+                                  <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-500"></div>
+                                </label>
+                            </div>
+                            
+                            {autoSettings.scheduleEnabled && (
+                                <div className="grid grid-cols-2 gap-3 animate-in slide-in-from-top-2 duration-300">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] text-slate-400">Início</label>
+                                        <input 
+                                            type="time" 
+                                            value={autoSettings.startTime}
+                                            disabled={isAutoRunning}
+                                            onChange={(e) => setAutoSettings({...autoSettings, startTime: e.target.value})}
+                                            className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-sm text-white focus:ring-yellow-500/50"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] text-slate-400">Fim</label>
+                                        <input 
+                                            type="time" 
+                                            value={autoSettings.endTime}
+                                            disabled={isAutoRunning}
+                                            onChange={(e) => setAutoSettings({...autoSettings, endTime: e.target.value})}
+                                            className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-sm text-white focus:ring-yellow-500/50"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                         <div className="flex-1 flex flex-col justify-end gap-3 mt-4">
                             <Button 
                                 className={cn(
-                                    "h-16 text-lg font-black flex items-center justify-center gap-2 rounded-xl shadow-lg transition-all",
+                                    "h-14 text-lg font-black flex items-center justify-center gap-2 rounded-xl shadow-lg transition-all",
                                     isAutoRunning 
                                         ? "bg-red-600 hover:bg-red-700 text-white animate-pulse" 
                                         : "bg-yellow-500 hover:bg-yellow-600 text-slate-900"
                                 )}
                                 onClick={() => setIsAutoRunning(!isAutoRunning)}
-                                disabled={isMarketLocked && !isAutoRunning}
+                                disabled={isAutoLocked && !isAutoRunning}
                             >
                                 {isAutoRunning ? (
                                     <>PAUSAR BOT <Pause className="h-5 w-5 fill-current" /></>
                                 ) : (
-                                    <>INICIAR BOT <Play className="h-5 w-5 fill-current" /></>
+                                    <>
+                                        {autoSettings.scheduleEnabled ? 'AGENDAR BOT' : 'INICIAR BOT'}
+                                        <Play className="h-5 w-5 fill-current" />
+                                    </>
                                 )}
                             </Button>
-                            
-                            {isAutoRunning && (
-                                <div className="text-center">
-                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-yellow-500/10 text-yellow-500 text-xs font-bold border border-yellow-500/20 animate-pulse">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
-                                        Aguardando Sinal Sniper...
-                                    </span>
-                                </div>
-                            )}
                         </div>
                     </div>
                 )}
