@@ -2,20 +2,32 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, CheckCircle2, XCircle, AlertTriangle, PlayCircle, Zap, Clock, ShieldAlert } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, CheckCircle2, XCircle, AlertTriangle, PlayCircle, Zap, Clock, ShieldAlert, ChevronDown } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 
+// Configuração dos Ativos Disponíveis
+const AVAILABLE_ASSETS = [
+  { id: 'R_100', name: 'Volatility 100 (1s) Index', basePrice: 1240.50, volatility: 2.0 },
+  { id: 'R_75', name: 'Volatility 75 (1s) Index', basePrice: 450.25, volatility: 1.5 },
+  { id: 'R_50', name: 'Volatility 50 (1s) Index', basePrice: 320.10, volatility: 1.2 },
+  { id: 'R_25', name: 'Volatility 25 (1s) Index', basePrice: 890.00, volatility: 1.0 },
+  { id: 'R_10', name: 'Volatility 10 (1s) Index', basePrice: 1500.50, volatility: 0.8 },
+];
+
 export function DashboardView() {
   const [balance, setBalance] = useState(1240.50);
-  const [symbol] = useState("Volatility 100 (1s)");
+  
+  // Estado do Ativo Selecionado
+  const [activeAsset, setActiveAsset] = useState(AVAILABLE_ASSETS[0]);
+  
   const [stake, setStake] = useState(10);
   const [duration, setDuration] = useState(5);
   const [timeframe, setTimeframe] = useState('M1');
 
   // Estado da Análise
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
-  const [currentPrice, setCurrentPrice] = useState(1050.00);
+  const [currentPrice, setCurrentPrice] = useState(activeAsset.basePrice);
   const [candles, setCandles] = useState<Candle[]>([]);
 
   // --- GERENCIAMENTO DE RISCO SNIPER ---
@@ -43,7 +55,9 @@ export function DashboardView() {
 
   // Simulação de Mercado
   useEffect(() => {
+    // Resetar gráfico ao trocar ativo ou timeframe
     setCandles([]);
+    setAnalysis(null);
     lastCandleCreationRef.current = Date.now();
     
     // M1 = 60s, M5 = 300s...
@@ -51,9 +65,11 @@ export function DashboardView() {
     
     // Inicializar histórico
     const initialCandles: Candle[] = [];
-    let price = 1050.00;
+    let price = activeAsset.basePrice; // Preço base do ativo selecionado
     const now = Date.now();
-    const volatilityMultiplier = timeframe === 'M1' ? 1 : timeframe === 'M5' ? 2.5 : 5;
+    
+    // Volatilidade ajustada pelo ativo E pelo timeframe
+    const volatilityMultiplier = (timeframe === 'M1' ? 1 : timeframe === 'M5' ? 2.5 : 5) * activeAsset.volatility;
 
     for (let i = 60; i > 0; i--) {
       const open = price;
@@ -77,7 +93,7 @@ export function DashboardView() {
       const timeSinceLastCandle = currentTime - lastCandleCreationRef.current;
       const shouldCreateNewCandle = timeSinceLastCandle >= candleDuration;
 
-      const tickVolatility = timeframe === 'M1' ? 0.8 : 2;
+      const tickVolatility = (timeframe === 'M1' ? 0.8 : 2) * activeAsset.volatility;
       const change = (Math.random() - 0.5) * tickVolatility;
 
       setCandles(prev => {
@@ -115,7 +131,7 @@ export function DashboardView() {
     }, 1000); 
 
     return () => clearInterval(interval);
-  }, [timeframe]);
+  }, [timeframe, activeAsset]); // Recria se mudar Timeframe ou Ativo
 
   const handleTrade = (type: 'CALL' | 'PUT') => {
       if (isMarketLocked) return;
@@ -136,7 +152,7 @@ export function DashboardView() {
 
       // Feedback visual
       const msg = isWin ? `WIN! +${formatCurrency(stake * 0.95)}` : `LOSS! -${formatCurrency(stake)}`;
-      alert(`Ordem ${type} Finalizada (Simulação)\nResultado: ${msg}`);
+      alert(`Ordem ${type} em ${activeAsset.name}\nResultado: ${msg}`);
   };
 
   const getDirectionColor = (dir: string) => {
@@ -153,7 +169,7 @@ export function DashboardView() {
 
   // SVG Chart rendering (mesmo código anterior, simplificado aqui)
   const renderChart = () => {
-    if (candles.length === 0) return null;
+    if (candles.length === 0) return <div className="h-full flex items-center justify-center text-slate-400">Carregando dados do ativo...</div>;
     const minPrice = Math.min(...candles.map(c => c.low));
     const maxPrice = Math.max(...candles.map(c => c.high));
     const priceRange = maxPrice - minPrice || 1;
@@ -188,9 +204,22 @@ export function DashboardView() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900">{symbol}</h2>
-          <div className="flex items-center gap-2 text-slate-500 mt-1">
+        <div className="flex items-center gap-4">
+          {/* SELETOR DE ATIVOS */}
+          <div className="relative group">
+            <select 
+              value={activeAsset.id}
+              onChange={(e) => setActiveAsset(AVAILABLE_ASSETS.find(a => a.id === e.target.value) || AVAILABLE_ASSETS[0])}
+              className="appearance-none bg-slate-900 text-white text-2xl font-bold py-2 pl-4 pr-10 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors"
+            >
+              {AVAILABLE_ASSETS.map(asset => (
+                <option key={asset.id} value={asset.id}>{asset.name}</option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-6 w-6 text-slate-400 pointer-events-none" />
+          </div>
+
+          <div className="flex items-center gap-2 text-slate-500">
             <span className="flex items-center text-green-600 text-xs font-bold uppercase tracking-wider bg-green-100 px-2 py-0.5 rounded">
               Modo Sniper Ativo
             </span>
@@ -246,7 +275,7 @@ export function DashboardView() {
         <div className="col-span-12 lg:col-span-8 space-y-4">
           <Card className="h-[400px] flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between pb-2 border-b">
-              <CardTitle className="text-sm font-medium text-slate-500">Gráfico em Tempo Real</CardTitle>
+              <CardTitle className="text-sm font-medium text-slate-500">Gráfico {activeAsset.name}</CardTitle>
               <div className="flex gap-2">
                 {['M1', 'M5', 'M15'].map((tf) => (
                   <button key={tf} onClick={() => setTimeframe(tf)} className={`px-3 py-1 text-xs font-bold rounded-md ${timeframe === tf ? 'bg-slate-900 text-white' : 'bg-slate-100'}`}>{tf}</button>
@@ -308,7 +337,7 @@ export function DashboardView() {
                     )}
                   </div>
                 </div>
-              ) : <div className="animate-pulse text-slate-400">Analisando mercado...</div>}
+              ) : <div className="animate-pulse text-slate-400">Carregando dados de {activeAsset.name}...</div>}
             </CardContent>
           </Card>
         </div>
