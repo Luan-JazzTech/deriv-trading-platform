@@ -20,39 +20,48 @@ export function DashboardView() {
 
   // Simulação de Mercado (Gerador de Candles Fake)
   useEffect(() => {
-    // Inicializa com 50 candles aleatórios
+    // Resetar candles ao mudar timeframe para dar feedback visual
+    setCandles([]); 
+    
+    // Inicializa com 50 candles aleatórios com volatilidade ajustada pelo timeframe
     const initialCandles: Candle[] = [];
     let price = 1050.00;
     const now = Date.now();
-    for (let i = 50; i > 0; i--) {
+    // Volatilidade baseada no timeframe (apenas visual)
+    const volatilityMultiplier = timeframe === 'M1' ? 1 : timeframe === 'M5' ? 2 : 4;
+
+    for (let i = 40; i > 0; i--) {
       const open = price;
-      const close = price + (Math.random() - 0.5) * 2;
+      const move = (Math.random() - 0.5) * 5 * volatilityMultiplier;
+      const close = price + move;
+      const high = Math.max(open, close) + Math.random() * 2;
+      const low = Math.min(open, close) - Math.random() * 2;
+      
       initialCandles.push({
         time: now - i * 60000,
         open,
-        high: Math.max(open, close) + Math.random(),
-        low: Math.min(open, close) - Math.random(),
+        high,
+        low,
         close
       });
       price = close;
     }
     setCandles(initialCandles);
 
-    // Loop de atualização (Simula WebSocket chegando tick a tick)
+    // Loop de atualização
     const interval = setInterval(() => {
       setCandles(prev => {
+        if (prev.length === 0) return prev;
         const last = prev[prev.length - 1];
-        // Simplesmente altera o preço atual aleatoriamente (Random Walk)
-        const volatility = 1.5;
-        const change = (Math.random() - 0.5) * volatility;
+        
+        // Random Walk
+        const change = (Math.random() - 0.5) * 2;
         const newPrice = last.close + change;
         
-        // Atualiza preço visual
         setCurrentPrice(newPrice);
 
-        // A cada 5 ticks, cria um novo candle (simulando tempo passando rápido)
-        // Na vida real, isso seria controlado pelo tempo do servidor
-        if (Math.random() > 0.7) {
+        // 20% de chance de criar novo candle
+        if (Math.random() > 0.8) {
             const newCandle: Candle = {
                 time: Date.now(),
                 open: last.close,
@@ -60,16 +69,15 @@ export function DashboardView() {
                 high: Math.max(last.close, newPrice),
                 low: Math.min(last.close, newPrice)
             };
-            // Mantém tamanho fixo do array para não explodir memória
+            // Mantém últimos 40 candles
             const newHistory = [...prev.slice(1), newCandle];
             
-            // Roda a Engine de Análise nos novos dados!
             const result = analyzeMarket(newHistory);
             setAnalysis(result);
             
             return newHistory;
         } else {
-            // Apenas atualiza o fechamento do último candle
+            // Atualiza último candle
             const updatedLast = { 
                 ...last, 
                 close: newPrice,
@@ -78,14 +86,13 @@ export function DashboardView() {
             };
             const newHistory = [...prev.slice(0, -1), updatedLast];
             
-            // Roda engine também (análise intra-candle)
             const result = analyzeMarket(newHistory);
             setAnalysis(result);
             
             return newHistory;
         }
       });
-    }, 1000); // Atualiza a cada 1 segundo
+    }, 500); // Mais rápido para ver movimento
 
     return () => clearInterval(interval);
   }, [timeframe]);
@@ -96,10 +103,66 @@ export function DashboardView() {
     return 'text-slate-500';
   };
 
-  const getDirectionBg = (dir: string) => {
-    if (dir === 'CALL') return 'bg-green-500';
-    if (dir === 'PUT') return 'bg-red-500';
-    return 'bg-slate-500';
+  // Lógica de Renderização do Gráfico (Auto-Scale)
+  const renderChart = () => {
+    if (candles.length === 0) return null;
+
+    // 1. Encontrar Min e Max da tela atual para escala
+    const minPrice = Math.min(...candles.map(c => c.low));
+    const maxPrice = Math.max(...candles.map(c => c.high));
+    const range = maxPrice - minPrice || 1; // Evitar divisão por zero
+
+    return (
+      <div className="relative w-full h-full flex items-end justify-between px-2 gap-1 overflow-hidden">
+        {/* Linhas de Grade (Grid) */}
+        <div className="absolute inset-0 flex flex-col justify-between text-[10px] text-slate-300 pointer-events-none p-1">
+            <span className="border-b border-slate-100 w-full">{maxPrice.toFixed(2)}</span>
+            <span className="border-b border-slate-100 w-full">{(minPrice + range/2).toFixed(2)}</span>
+            <span className="border-b border-slate-100 w-full">{minPrice.toFixed(2)}</span>
+        </div>
+
+        {candles.map((c, i) => {
+            const isGreen = c.close >= c.open;
+            
+            // Cálculos de porcentagem para posicionamento absoluto relativo ao container
+            const highPct = ((c.high - minPrice) / range) * 100;
+            const lowPct = ((c.low - minPrice) / range) * 100;
+            const openPct = ((c.open - minPrice) / range) * 100;
+            const closePct = ((c.close - minPrice) / range) * 100;
+            
+            const bodyTop = Math.max(openPct, closePct);
+            const bodyBottom = Math.min(openPct, closePct);
+            const bodyHeight = Math.max(bodyTop - bodyBottom, 1); // Mínimo 1% para visibilidade
+
+            return (
+                <div key={i} className="relative w-full h-full flex justify-center group">
+                    {/* Tooltip simples */}
+                    <div className="hidden group-hover:block absolute bottom-full mb-1 bg-slate-800 text-white text-[10px] p-1 rounded z-10 whitespace-nowrap">
+                        O:{c.open.toFixed(2)} C:{c.close.toFixed(2)}
+                    </div>
+
+                    {/* Pavio (High - Low) */}
+                    <div 
+                        className={`absolute w-[1px] ${isGreen ? 'bg-green-600' : 'bg-red-600'}`}
+                        style={{
+                            bottom: `${lowPct}%`,
+                            height: `${highPct - lowPct}%`
+                        }}
+                    />
+                    
+                    {/* Corpo (Open - Close) */}
+                    <div 
+                        className={`absolute w-[80%] max-w-[12px] rounded-sm ${isGreen ? 'bg-green-500' : 'bg-red-500'}`}
+                        style={{
+                            bottom: `${bodyBottom}%`,
+                            height: `${bodyHeight}%`
+                        }}
+                    />
+                </div>
+            );
+        })}
+      </div>
+    );
   };
 
   return (
@@ -151,40 +214,26 @@ export function DashboardView() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex-1 bg-slate-50 relative group overflow-hidden p-0">
-             {/* Visualização Simplificada de Candles */}
-             <div className="w-full h-full flex items-end justify-end px-4 gap-1">
-                {candles.slice(-40).map((c, i) => {
-                    const height = Math.abs(c.close - c.open) * 10 + 2; // Escala visual
-                    const isGreen = c.close >= c.open;
-                    return (
-                        <div 
-                            key={i} 
-                            className={`w-3 rounded-t-sm ${isGreen ? 'bg-green-500' : 'bg-red-500'}`}
-                            style={{ height: `${Math.min(height, 200)}px`, opacity: 0.8 }}
-                        />
-                    )
-                })}
-             </div>
+          <CardContent className="flex-1 bg-slate-50 relative p-4">
+             {renderChart()}
              
-            <div className="absolute top-4 left-4 text-xs text-slate-400 bg-white/90 p-2 rounded border">
-                Simulação de Mercado Ativa<br/>
-                Engine calculando RSI e EMA...
+            <div className="absolute top-4 left-4 text-xs text-slate-400 bg-white/90 p-2 rounded border shadow-sm">
+                <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div> Live Feed</span>
             </div>
           </CardContent>
         </Card>
 
         {/* Control Panel */}
         <div className="space-y-6">
-          {/* Signal Card Dinâmico */}
-          <Card className={`border-l-4 transition-colors duration-300 ${analysis?.direction === 'CALL' ? 'border-l-green-500' : analysis?.direction === 'PUT' ? 'border-l-red-500' : 'border-l-slate-300'}`}>
-            <CardHeader className="pb-2">
+          {/* Signal Card Dinâmico - Agora com Altura Fixa */}
+          <Card className={`h-[280px] flex flex-col border-l-4 transition-colors duration-300 ${analysis?.direction === 'CALL' ? 'border-l-green-500' : analysis?.direction === 'PUT' ? 'border-l-red-500' : 'border-l-slate-300'}`}>
+            <CardHeader className="pb-2 flex-none">
               <CardTitle className="text-sm font-medium text-slate-500 uppercase">Sugestão da IA</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex-1 overflow-hidden flex flex-col">
               {analysis ? (
                   <>
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-4 flex-none">
                         <div className="flex items-center gap-2">
                         {analysis.direction === 'CALL' && <TrendingUp className="h-8 w-8 text-green-600" />}
                         {analysis.direction === 'PUT' && <TrendingDown className="h-8 w-8 text-red-600" />}
@@ -196,28 +245,28 @@ export function DashboardView() {
                         </div>
                         <div className="text-right">
                         <span className="text-2xl font-bold text-slate-900">{analysis.score}%</span>
-                        <p className="text-xs text-slate-500">Score de Confiança</p>
+                        <p className="text-xs text-slate-500">Confiança</p>
                         </div>
                     </div>
                     
-                    <div className="space-y-3">
+                    <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
                         {analysis.factors.map((factor, idx) => (
-                            <div key={idx} className="flex items-center justify-between text-sm">
-                                <span className="text-slate-600 flex items-center gap-1">
-                                    <ArrowRight className="h-3 w-3" /> {factor.label}
+                            <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-slate-50 last:border-0">
+                                <span className="text-slate-600 flex items-center gap-1 truncate max-w-[150px]">
+                                    <ArrowRight className="h-3 w-3 flex-none" /> {factor.label}
                                 </span>
-                                <span className={`font-medium ${factor.status === 'POSITIVE' ? 'text-green-600' : factor.status === 'NEGATIVE' ? 'text-red-600' : 'text-slate-400'}`}>
+                                <span className={`font-medium flex-none ${factor.status === 'POSITIVE' ? 'text-green-600' : factor.status === 'NEGATIVE' ? 'text-red-600' : 'text-slate-400'}`}>
                                     {factor.status === 'POSITIVE' ? 'Alta' : factor.status === 'NEGATIVE' ? 'Baixa' : 'Neutro'}
                                 </span>
                             </div>
                         ))}
                         {analysis.factors.length === 0 && (
-                            <p className="text-xs text-slate-400 italic">Aguardando mais dados para confluência...</p>
+                            <p className="text-xs text-slate-400 italic mt-4 text-center">Aguardando confluência...</p>
                         )}
                     </div>
                   </>
               ) : (
-                  <div className="flex flex-col items-center justify-center h-32 text-slate-400">
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400">
                       <Activity className="animate-spin h-6 w-6 mb-2" />
                       <p>Analisando mercado...</p>
                   </div>
