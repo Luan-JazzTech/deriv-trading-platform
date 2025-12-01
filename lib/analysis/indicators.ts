@@ -20,10 +20,7 @@ export function calculateEMA(data: number[], period: number): number[] {
   if (data.length < period) return [];
 
   const k = 2 / (period + 1);
-  const ema: number[] = [data[0]]; // Ponto de partida simples
-
-  // Primeiro calculamos uma SMA inicial para estabilizar
-  // Mas para simplificar em realtime arrays pequenos, usamos o primeiro valor
+  const ema: number[] = [data[0]]; 
   
   for (let i = 1; i < data.length; i++) {
     const prevEma = ema[i - 1];
@@ -36,16 +33,79 @@ export function calculateEMA(data: number[], period: number): number[] {
 }
 
 /**
+ * Calcula Desvio Padrão (Necessário para Bollinger)
+ */
+function calculateStdDev(data: number[], period: number): number[] {
+  if (data.length < period) return [];
+  
+  const stdDevs: number[] = [];
+  const sma = calculateSMA(data, period);
+
+  // O array de SMA começa no índice (period - 1) dos dados originais
+  // Ajustamos o loop para alinhar
+  for (let i = 0; i < sma.length; i++) {
+    const sliceStart = i;
+    const sliceEnd = i + period;
+    const slice = data.slice(sliceStart, sliceEnd);
+    const mean = sma[i];
+    
+    const squaredDiffs = slice.map(val => Math.pow(val - mean, 2));
+    const avgSquaredDiff = squaredDiffs.reduce((a, b) => a + b, 0) / period;
+    stdDevs.push(Math.sqrt(avgSquaredDiff));
+  }
+  
+  return stdDevs;
+}
+
+/**
+ * Bandas de Bollinger
+ * Retorna { upper, middle, lower } (apenas o último valor)
+ */
+export function calculateBollingerBands(data: number[], period: number = 20, multiplier: number = 2) {
+  if (data.length < period) return null;
+
+  const smaFull = calculateSMA(data, period);
+  const stdDevFull = calculateStdDev(data, period);
+  
+  const lastSMA = smaFull[smaFull.length - 1];
+  const lastStdDev = stdDevFull[stdDevFull.length - 1];
+
+  return {
+    upper: lastSMA + (lastStdDev * multiplier),
+    middle: lastSMA,
+    lower: lastSMA - (lastStdDev * multiplier)
+  };
+}
+
+/**
+ * Oscilador Estocástico (%K)
+ * Retorna o valor atual (0-100)
+ */
+export function calculateStochastic(highs: number[], lows: number[], closes: number[], period: number = 14): number {
+  if (closes.length < period) return 50;
+
+  const currentClose = closes[closes.length - 1];
+  // Pega os últimos 'period' candles
+  const relevantHighs = highs.slice(-period);
+  const relevantLows = lows.slice(-period);
+
+  const highestHigh = Math.max(...relevantHighs);
+  const lowestLow = Math.min(...relevantLows);
+
+  if (highestHigh === lowestLow) return 50;
+
+  return ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;
+}
+
+/**
  * Calcula o Índice de Força Relativa (RSI)
- * Retorna apenas o valor mais recente (atual)
  */
 export function calculateRSI(prices: number[], period: number = 14): number {
-  if (prices.length < period + 1) return 50; // Dados insuficientes
+  if (prices.length < period + 1) return 50; 
 
   let gains = 0;
   let losses = 0;
 
-  // Primeiro cálculo (Média simples dos ganhos/perdas iniciais)
   for (let i = 1; i <= period; i++) {
     const change = prices[i] - prices[i - 1];
     if (change > 0) gains += change;
@@ -55,7 +115,6 @@ export function calculateRSI(prices: number[], period: number = 14): number {
   let avgGain = gains / period;
   let avgLoss = losses / period;
 
-  // Suavização Wilders para o restante dos dados
   for (let i = period + 1; i < prices.length; i++) {
     const change = prices[i] - prices[i - 1];
     const currentGain = change > 0 ? change : 0;
@@ -69,31 +128,4 @@ export function calculateRSI(prices: number[], period: number = 14): number {
 
   const rs = avgGain / avgLoss;
   return 100 - (100 / (1 + rs));
-}
-
-/**
- * Verifica Padrão de Engolfo (Alta ou Baixa) nos últimos 2 candles
- */
-export function checkEngulfing(prevOpen: number, prevClose: number, currOpen: number, currClose: number): 'BULLISH' | 'BEARISH' | null {
-  const prevBody = Math.abs(prevClose - prevOpen);
-  const currBody = Math.abs(currClose - currOpen);
-
-  // Engolfo de Alta
-  // Anterior vermelho (Close < Open), Atual verde (Close > Open)
-  // Atual abre abaixo do fechamento anterior e fecha acima da abertura anterior
-  if (prevClose < prevOpen && currClose > currOpen) {
-    if (currOpen <= prevClose && currClose >= prevOpen) {
-      return 'BULLISH';
-    }
-  }
-
-  // Engolfo de Baixa
-  // Anterior verde, Atual vermelho
-  if (prevClose > prevOpen && currClose < currOpen) {
-    if (currOpen >= prevClose && currClose <= prevOpen) {
-      return 'BEARISH';
-    }
-  }
-
-  return null;
 }
