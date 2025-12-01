@@ -10,6 +10,7 @@ export function DashboardView() {
   const [symbol] = useState("Volatility 100 (1s)");
   const [stake, setStake] = useState(10);
   const [duration, setDuration] = useState(5);
+  const [timeframe, setTimeframe] = useState('M5'); // Estado para o timeframe
 
   return (
     <div className="space-y-6">
@@ -38,18 +39,27 @@ export function DashboardView() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Activity className="h-5 w-5 text-slate-500" />
-                {symbol}
+                {symbol} <span className="text-slate-400 text-sm font-normal">({timeframe})</span>
               </CardTitle>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="text-xs">M1</Button>
-                <Button variant="outline" size="sm" className="text-xs bg-slate-100">M5</Button>
-                <Button variant="outline" size="sm" className="text-xs">M15</Button>
+                {['M1', 'M5', 'M15'].map((tf) => (
+                  <Button 
+                    key={tf}
+                    variant={timeframe === tf ? "default" : "outline"} 
+                    size="sm" 
+                    className="text-xs"
+                    onClick={() => setTimeframe(tf)}
+                  >
+                    {tf}
+                  </Button>
+                ))}
               </div>
             </div>
           </CardHeader>
           <CardContent className="flex-1 bg-slate-50 relative group">
-            <div className="absolute inset-0 flex items-center justify-center text-slate-400">
-              <p>Gráfico em Tempo Real (Conexão WebSocket aguardando Fase 7)</p>
+            <div className="absolute inset-0 flex items-center justify-center text-slate-400 flex-col gap-2">
+              <p>Gráfico em Tempo Real ({timeframe})</p>
+              <span className="text-xs text-slate-300">(Conexão WebSocket aguardando Fase 7)</span>
             </div>
             {/* Placeholder Visual do Gráfico */}
             <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-t from-green-500/10 to-transparent opacity-50" />
