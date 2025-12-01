@@ -1,61 +1,40 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, Settings2, CalendarClock, Timer } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 
 // --- CONFIGURAÇÃO DE ATIVOS (DERIV FULL) ---
 const AVAILABLE_ASSETS = [
-  // --- SINTÉTICOS (VOLATILITY) ---
   { id: 'R_100', name: 'Volatility 100 (1s)', basePrice: 1240.50, volatility: 2.0, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
   { id: 'R_75', name: 'Volatility 75 (1s)', basePrice: 450.25, volatility: 1.5, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
   { id: 'R_50', name: 'Volatility 50 (1s)', basePrice: 280.10, volatility: 0.8, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
   { id: 'R_25', name: 'Volatility 25 (1s)', basePrice: 1050.00, volatility: 1.2, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
   { id: 'R_10', name: 'Volatility 10 (1s)', basePrice: 1800.50, volatility: 1.0, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
-  
-  // --- SINTÉTICOS (JUMP/STEP) ---
   { id: 'JUMP_10', name: 'Jump 10 Index', basePrice: 150.00, volatility: 3.5, type: 'synthetic', decimals: 2, group: 'Jump Indices' },
   { id: 'JUMP_25', name: 'Jump 25 Index', basePrice: 250.00, volatility: 3.0, type: 'synthetic', decimals: 2, group: 'Jump Indices' },
   { id: 'JUMP_50', name: 'Jump 50 Index', basePrice: 550.00, volatility: 2.5, type: 'synthetic', decimals: 2, group: 'Jump Indices' },
   { id: 'JUMP_75', name: 'Jump 75 Index', basePrice: 750.00, volatility: 2.0, type: 'synthetic', decimals: 2, group: 'Jump Indices' },
   { id: 'JUMP_100', name: 'Jump 100 Index', basePrice: 1050.00, volatility: 1.8, type: 'synthetic', decimals: 2, group: 'Jump Indices' },
-
-  // --- SINTÉTICOS (CRASH/BOOM) ---
   { id: 'CRASH_1000', name: 'Crash 1000 Index', basePrice: 6000.00, volatility: 4.0, type: 'synthetic', decimals: 2, group: 'Crash/Boom' },
   { id: 'BOOM_1000', name: 'Boom 1000 Index', basePrice: 12000.00, volatility: 4.0, type: 'synthetic', decimals: 2, group: 'Crash/Boom' },
-  { id: 'CRASH_500', name: 'Crash 500 Index', basePrice: 4000.00, volatility: 3.0, type: 'synthetic', decimals: 2, group: 'Crash/Boom' },
-  { id: 'BOOM_500', name: 'Boom 500 Index', basePrice: 8000.00, volatility: 3.0, type: 'synthetic', decimals: 2, group: 'Crash/Boom' },
-
-  { id: 'BEAR', name: 'Bear Market Index', basePrice: 980.00, volatility: 1.1, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
-  { id: 'BULL', name: 'Bull Market Index', basePrice: 1020.00, volatility: 1.1, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
-
-  // --- FOREX MAJORS ---
   { id: 'frxEURUSD', name: 'EUR/USD', basePrice: 1.0850, volatility: 0.00015, type: 'forex', decimals: 5, group: 'Forex Majors' },
   { id: 'frxGBPUSD', name: 'GBP/USD', basePrice: 1.2730, volatility: 0.00020, type: 'forex', decimals: 5, group: 'Forex Majors' },
   { id: 'frxUSDJPY', name: 'USD/JPY', basePrice: 155.40, volatility: 0.05, type: 'forex', decimals: 3, group: 'Forex Majors' },
-  { id: 'frxAUDUSD', name: 'AUD/USD', basePrice: 0.6650, volatility: 0.00015, type: 'forex', decimals: 5, group: 'Forex Majors' },
-  { id: 'frxUSDCAD', name: 'USD/CAD', basePrice: 1.3650, volatility: 0.00018, type: 'forex', decimals: 5, group: 'Forex Majors' },
-  
-  // --- FOREX MINORS ---
-  { id: 'frxEURGBP', name: 'EUR/GBP', basePrice: 0.8550, volatility: 0.00012, type: 'forex', decimals: 5, group: 'Forex Minors' },
-  { id: 'frxEURJPY', name: 'EUR/JPY', basePrice: 168.20, volatility: 0.06, type: 'forex', decimals: 3, group: 'Forex Minors' },
-  { id: 'frxGBPJPY', name: 'GBP/JPY', basePrice: 196.50, volatility: 0.08, type: 'forex', decimals: 3, group: 'Forex Minors' },
-  { id: 'frxAUDCAD', name: 'AUD/CAD', basePrice: 0.9120, volatility: 0.00014, type: 'forex', decimals: 5, group: 'Forex Minors' },
-
-  // --- COMMODITIES ---
   { id: 'frxXAUUSD', name: 'Gold / USD', basePrice: 2350.00, volatility: 1.5, type: 'commodities', decimals: 2, group: 'Commodities' },
-  { id: 'frxXAGUSD', name: 'Silver / USD', basePrice: 30.50, volatility: 0.05, type: 'commodities', decimals: 3, group: 'Commodities' },
-  { id: 'frxOILUSD', name: 'Oil / USD', basePrice: 82.40, volatility: 0.10, type: 'commodities', decimals: 2, group: 'Commodities' },
-  { id: 'frxPDUSD', name: 'Palladium / USD', basePrice: 980.00, volatility: 2.0, type: 'commodities', decimals: 2, group: 'Commodities' },
-
-  // --- CRYPTO ---
   { id: 'cryBTCUSD', name: 'BTC/USD', basePrice: 64250.00, volatility: 45.0, type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
   { id: 'cryETHUSD', name: 'ETH/USD', basePrice: 3450.00, volatility: 5.0, type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
-  { id: 'cryLTCUSD', name: 'LTC/USD', basePrice: 85.00, volatility: 0.5, type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
-  { id: 'cryXRPUSD', name: 'XRP/USD', basePrice: 0.6200, volatility: 0.005, type: 'crypto', decimals: 4, group: 'Cryptocurrencies' },
-  { id: 'crySOLUSD', name: 'SOL/USD', basePrice: 145.50, volatility: 1.2, type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
 ];
+
+interface AssetRanking {
+    id: string;
+    name: string;
+    winRate: number;
+    direction: 'CALL' | 'PUT';
+    score: number;
+}
 
 export function DashboardView() {
   const [balance, setBalance] = useState(1240.50);
@@ -71,27 +50,48 @@ export function DashboardView() {
   // --- GERENCIAMENTO DE RISCO SNIPER ---
   const [dailyStats, setDailyStats] = useState({ trades: 0, wins: 0, losses: 0, profit: 0 });
   
-  // --- MODO AUTOMÁTICO (BOT) ---
-  const [executionMode, setExecutionMode] = useState<'MANUAL' | 'AUTO'>('MANUAL');
+  // --- MODO DE EXECUÇÃO ---
+  const [executionMode, setExecutionMode] = useState<'MANUAL' | 'AUTO' | 'SCANNER'>('MANUAL');
+  
+  // --- CONFIGURAÇÃO BOT ---
   const [isAutoRunning, setIsAutoRunning] = useState(false);
-  const [autoSettings, setAutoSettings] = useState({
-      stake: 5.0,
-      maxTrades: 5,
-      stopWin: 20.0,
-      stopLoss: 15.0,
-      scheduleEnabled: false,
-      startTime: '09:00',
-      endTime: '17:00'
-  });
   const [botStatus, setBotStatus] = useState<'IDLE' | 'RUNNING' | 'WAITING_SCHEDULE' | 'STOPPED_BY_RISK'>('IDLE');
   
+  // Estratégia de Parada (Stop Strategy)
+  const [stopMode, setStopMode] = useState<'FINANCIAL' | 'QUANTITY'>('FINANCIAL');
+  
+  const [autoSettings, setAutoSettings] = useState({
+      stake: 5.0,
+      
+      // Stop Financeiro
+      stopWin: 20.0,
+      stopLoss: 15.0,
+      
+      // Stop Quantidade
+      maxTrades: 3,
+
+      // Agendamento
+      scheduleEnabled: false,
+      startTime: '09:00',
+      endTime: '17:00',
+      activeDays: [1, 2, 3, 4, 5] // 0=Dom, 1=Seg, ..., 6=Sab
+  });
+
+  // --- MARKET SCANNER (RANKING) ---
+  const [marketRanking, setMarketRanking] = useState<AssetRanking[]>([]);
+
   // Configuração Global Manual
   const RISK_CONFIG = { maxTrades: 10, stopWin: 100.00, stopLoss: -50.00 };
   const isManualLocked = dailyStats.trades >= RISK_CONFIG.maxTrades || dailyStats.profit >= RISK_CONFIG.stopWin || dailyStats.profit <= RISK_CONFIG.stopLoss;
 
-  const isAutoLocked = dailyStats.trades >= autoSettings.maxTrades || 
-                       dailyStats.profit >= autoSettings.stopWin || 
-                       dailyStats.profit <= -Math.abs(autoSettings.stopLoss);
+  // Verifica se o Bot deve parar
+  const isAutoLocked = () => {
+    if (stopMode === 'QUANTITY') {
+        return dailyStats.trades >= autoSettings.maxTrades;
+    } else {
+        return dailyStats.profit >= autoSettings.stopWin || dailyStats.profit <= -Math.abs(autoSettings.stopLoss);
+    }
+  };
 
   const lastAutoTradeTimestamp = useRef<number>(0);
   const lastCandleCreationRef = useRef<number>(Date.now());
@@ -111,14 +111,11 @@ export function DashboardView() {
       const open = price;
       const move = (Math.random() - 0.5) * 5 * volatilityMultiplier;
       const close = price + move;
-      const bodyMax = Math.max(open, close);
-      const bodyMin = Math.min(open, close);
       initialCandles.push({
         time: now - (i * candleDuration),
-        open,
-        close,
-        high: bodyMax + (Math.random() * volatilityMultiplier * 0.5),
-        low: bodyMin - (Math.random() * volatilityMultiplier * 0.5)
+        open, close,
+        high: Math.max(open, close) + (Math.random() * volatilityMultiplier * 0.5),
+        low: Math.min(open, close) - (Math.random() * volatilityMultiplier * 0.5)
       });
       price = close;
     }
@@ -127,8 +124,7 @@ export function DashboardView() {
 
     const interval = setInterval(() => {
       const currentTime = Date.now();
-      const timeSinceLastCandle = currentTime - lastCandleCreationRef.current;
-      const shouldCreateNewCandle = timeSinceLastCandle >= candleDuration;
+      const shouldCreateNewCandle = currentTime - lastCandleCreationRef.current >= candleDuration;
       const tickVolatility = (timeframe === 'M1' ? 0.8 : 2) * activeAsset.volatility;
       const change = (Math.random() - 0.5) * tickVolatility;
 
@@ -164,20 +160,46 @@ export function DashboardView() {
     return () => clearInterval(interval);
   }, [timeframe, activeAsset]);
 
+  // --- GERADOR DE RANKING FAKE ---
+  useEffect(() => {
+    // Atualiza o ranking a cada 10 segundos
+    const rankingInterval = setInterval(() => {
+        const sorted = [...AVAILABLE_ASSETS]
+            .map(asset => ({
+                id: asset.id,
+                name: asset.name,
+                // Simula um winrate e direção
+                winRate: Math.floor(Math.random() * (98 - 70) + 70),
+                direction: Math.random() > 0.5 ? 'CALL' : 'PUT' as 'CALL' | 'PUT',
+                score: Math.floor(Math.random() * 100)
+            }))
+            .sort((a, b) => b.winRate - a.winRate)
+            .slice(0, 5); // Top 5
+        setMarketRanking(sorted);
+    }, 10000);
+
+    return () => clearInterval(rankingInterval);
+  }, []);
+
   // --- LÓGICA DO BOT AUTOMÁTICO ---
   useEffect(() => {
-      // 0. Verifica se o bot deve estar rodando
       if (!isAutoRunning || executionMode !== 'AUTO') {
           setBotStatus('IDLE');
           return;
       }
 
-      // 1. Verifica Agendamento
+      // 1. Verifica Agendamento (Dia e Hora)
       if (autoSettings.scheduleEnabled) {
           const now = new Date();
+          const currentDay = now.getDay(); // 0-6
+          
+          if (!autoSettings.activeDays.includes(currentDay)) {
+             setBotStatus('WAITING_SCHEDULE');
+             return;
+          }
+
           const [startHour, startMin] = autoSettings.startTime.split(':').map(Number);
           const [endHour, endMin] = autoSettings.endTime.split(':').map(Number);
-          
           const start = new Date(now).setHours(startHour, startMin, 0, 0);
           const end = new Date(now).setHours(endHour, endMin, 0, 0);
           const current = now.getTime();
@@ -188,17 +210,16 @@ export function DashboardView() {
           }
       }
 
-      // 2. Verifica Travas de Segurança (Risk Management)
-      if (isAutoLocked) {
+      // 2. Verifica Travas de Segurança
+      if (isAutoLocked()) {
           setBotStatus('STOPPED_BY_RISK');
           return;
       }
 
       setBotStatus('RUNNING');
 
-      // 3. Executar Trade (se houver sinal e não estiver travado)
+      // 3. Executar Trade
       if (analysis && analysis.isSniperReady) {
-          // Evitar entrar no mesmo sinal repetidamente
           if (analysis.timestamp <= lastAutoTradeTimestamp.current) return;
 
           if (analysis.direction === 'CALL' || analysis.direction === 'PUT') {
@@ -206,15 +227,14 @@ export function DashboardView() {
               lastAutoTradeTimestamp.current = analysis.timestamp;
           }
       }
-
-  }, [analysis, isAutoRunning, executionMode, dailyStats, autoSettings, isAutoLocked]);
+  }, [analysis, isAutoRunning, executionMode, dailyStats, autoSettings, stopMode]);
 
 
   const handleTrade = (type: 'CALL' | 'PUT', tradeStake = stake) => {
       // Manual mode lock check
       if (executionMode === 'MANUAL' && isManualLocked) return;
 
-      const isWin = Math.random() > 0.4; // 60% chance simulated
+      const isWin = Math.random() > 0.4;
       const profit = isWin ? tradeStake * 0.95 : -tradeStake;
       const newStats = {
           trades: dailyStats.trades + 1,
@@ -234,6 +254,16 @@ export function DashboardView() {
       case 'synthetic': return <Activity className="h-5 w-5 text-purple-500" />;
       default: return <Flame className="h-5 w-5 text-red-500" />;
     }
+  };
+
+  const toggleDay = (dayIndex: number) => {
+      if (isAutoRunning) return;
+      const days = [...autoSettings.activeDays];
+      if (days.includes(dayIndex)) {
+          setAutoSettings({...autoSettings, activeDays: days.filter(d => d !== dayIndex)});
+      } else {
+          setAutoSettings({...autoSettings, activeDays: [...days, dayIndex]});
+      }
   };
 
   // --- RENDERIZADOR DE GRÁFICO (DARK THEME) ---
@@ -267,7 +297,7 @@ export function DashboardView() {
           const yOpen = normalizeY(candle.open); const yClose = normalizeY(candle.close);
           const yHigh = normalizeY(candle.high); const yLow = normalizeY(candle.low);
           const isGreen = candle.close >= candle.open;
-          const color = isGreen ? '#10b981' : '#f43f5e'; // Emerald-500 / Rose-500
+          const color = isGreen ? '#10b981' : '#f43f5e'; 
           const x = index * spacing + (spacing - candleWidth) / 2;
           const bodyHeight = Math.max(1, Math.abs(yClose - yOpen));
           
@@ -279,7 +309,6 @@ export function DashboardView() {
           );
         })}
         
-        {/* Linha de Preço Atual */}
         <line x1="0" y1={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} x2={width} y2={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} stroke="#3b82f6" strokeWidth="1" strokeDasharray="4" opacity="0.8" />
         <rect x={width - 60} y={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight - 10} width="60" height="20" fill="#3b82f6" rx="2" />
         <text x={width - 30} y={height - padding - ((currentPrice - minPrice) / priceRange) * usableHeight} fill="white" fontSize="11" fontWeight="bold" textAnchor="middle" alignmentBaseline="middle">
@@ -293,8 +322,6 @@ export function DashboardView() {
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* --- HUD HEADER --- */}
       <div className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-slate-900/50 backdrop-blur-md p-4 rounded-xl shadow-lg border border-slate-800">
-        
-        {/* ASSET SELECTOR */}
         <div className="relative group w-full lg:w-auto min-w-[320px]">
           <label className="text-[10px] uppercase font-bold text-slate-500 absolute -top-2 left-2 bg-slate-900 px-1 border border-slate-800 rounded">Ativo Selecionado</label>
           <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -305,7 +332,7 @@ export function DashboardView() {
             onChange={(e) => setActiveAsset(AVAILABLE_ASSETS.find(a => a.id === e.target.value) || AVAILABLE_ASSETS[0])}
             className="w-full appearance-none bg-slate-950 text-slate-200 text-lg font-bold py-3 pl-12 pr-10 rounded-lg border border-slate-800 cursor-pointer hover:border-slate-700 focus:outline-none focus:ring-2 focus:ring-green-500/50 transition-all shadow-inner"
           >
-            {['Derived Indices', 'Jump Indices', 'Crash/Boom', 'Forex Majors', 'Forex Minors', 'Commodities', 'Cryptocurrencies'].map(group => (
+            {['Derived Indices', 'Jump Indices', 'Crash/Boom', 'Forex Majors', 'Commodities', 'Cryptocurrencies'].map(group => (
               <optgroup key={group} label={group} className="bg-slate-900 text-slate-300">
                 {AVAILABLE_ASSETS.filter(a => a.group === group).map(asset => (
                   <option key={asset.id} value={asset.id}>{asset.name}</option>
@@ -316,7 +343,6 @@ export function DashboardView() {
           <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 pointer-events-none" />
         </div>
 
-        {/* RISK STATS HUD */}
         <div className="flex items-center gap-px bg-slate-950/80 text-white p-1 rounded-lg border border-slate-800 shadow-xl">
             <div className="px-5 py-2 border-r border-slate-800">
                 <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider">Saldo Demo</p>
@@ -328,33 +354,20 @@ export function DashboardView() {
                     <p className={`text-sm font-bold font-mono ${dailyStats.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {dailyStats.profit >= 0 ? '+' : ''}{formatCurrency(dailyStats.profit)}
                     </p>
-                    <span className="text-[10px] text-slate-600 font-mono">/ {formatCurrency(RISK_CONFIG.stopWin)}</span>
+                    <span className="text-[10px] text-slate-600 font-mono">/ {stopMode === 'FINANCIAL' ? formatCurrency(autoSettings.stopWin) : '---'}</span>
                 </div>
             </div>
             <div className="px-5 py-2">
                 <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider">Trades</p>
                 <div className="flex items-center gap-1">
-                    <p className={`text-sm font-bold font-mono ${dailyStats.trades >= RISK_CONFIG.maxTrades ? 'text-red-500' : 'text-slate-200'}`}>
+                    <p className={`text-sm font-bold font-mono ${dailyStats.trades >= autoSettings.maxTrades ? 'text-red-500' : 'text-slate-200'}`}>
                         {dailyStats.trades}
                     </p>
-                    <span className="text-[10px] text-slate-600 font-mono">/ {RISK_CONFIG.maxTrades}</span>
+                    <span className="text-[10px] text-slate-600 font-mono">/ {stopMode === 'QUANTITY' ? autoSettings.maxTrades : '---'}</span>
                 </div>
             </div>
         </div>
       </div>
-
-      {isManualLocked && executionMode === 'MANUAL' && (
-          <div className="bg-red-950/30 text-red-200 p-4 rounded-lg flex items-center justify-between border border-red-900/50 shadow-sm animate-pulse">
-              <div className="flex items-center gap-3">
-                  <ShieldAlert className="h-6 w-6 text-red-500" />
-                  <div>
-                      <h4 className="font-bold text-red-400">Gerenciamento de Risco Ativado</h4>
-                      <p className="text-xs opacity-70">Meta atingida ou limite de perdas alcançado. Respeite seu gerenciamento.</p>
-                  </div>
-              </div>
-              <Button variant="secondary" size="sm" onClick={() => window.location.reload()} className="bg-red-900/20 border border-red-800 hover:bg-red-900/40 text-red-300">Reiniciar Demo</Button>
-          </div>
-      )}
 
       <div className="grid grid-cols-12 gap-6 h-[calc(100vh-220px)]">
         {/* --- COLUNA PRINCIPAL (GRÁFICO) --- */}
@@ -421,7 +434,6 @@ export function DashboardView() {
             <CardContent className="pt-2">
               {analysis ? (
                 <div className="flex items-center justify-between gap-8">
-                  {/* Direção */}
                   <div className="flex flex-col items-center min-w-[140px] border-r border-slate-800 pr-4">
                       <span className="text-[10px] font-bold uppercase text-slate-500 mb-1">Recomendação</span>
                       <div className={cn(
@@ -435,8 +447,6 @@ export function DashboardView() {
                           {analysis.direction}
                       </div>
                   </div>
-
-                  {/* Probabilidade */}
                   <div className="flex flex-col items-center">
                       <span className="text-[10px] font-bold uppercase text-slate-500 mb-2">Assertividade</span>
                       <div className="relative h-16 w-16 flex items-center justify-center">
@@ -452,8 +462,6 @@ export function DashboardView() {
                           <span className={cn("text-sm font-bold", analysis.probability >= 80 ? "text-green-400" : "text-blue-400")}>{analysis.probability}%</span>
                       </div>
                   </div>
-
-                  {/* Lista de Fatores */}
                   <div className="flex-1 h-[100px] overflow-y-auto pr-2 border-l border-slate-800 pl-6 space-y-2 scrollbar-thin scrollbar-thumb-slate-800">
                     <span className="text-[10px] font-bold uppercase text-slate-500 sticky top-0 bg-slate-900 block pb-1">Confluências</span>
                     {analysis.factors.map((factor, idx) => (
@@ -465,11 +473,6 @@ export function DashboardView() {
                         <span className="text-slate-300 font-medium leading-tight">{factor.label}</span>
                       </div>
                     ))}
-                    {!analysis.isSniperReady && (
-                        <p className="text-xs text-yellow-600 font-bold mt-2 flex items-center gap-1.5">
-                            <Clock className="h-3.5 w-3.5" /> Aguardando gatilho...
-                        </p>
-                    )}
                   </div>
                 </div>
               ) : <div className="text-center py-8 text-slate-600 animate-pulse">Calibrando IA...</div>}
@@ -482,24 +485,15 @@ export function DashboardView() {
           <Card className="h-full flex flex-col bg-slate-900 shadow-xl border-slate-800 relative overflow-hidden">
              
              {/* TABS HEADER */}
-             <div className="grid grid-cols-2 border-b border-slate-800">
-                <button 
-                    onClick={() => setExecutionMode('MANUAL')}
-                    className={cn(
-                        "p-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors",
-                        executionMode === 'MANUAL' ? "bg-slate-800 text-white border-b-2 border-green-500" : "bg-slate-950 text-slate-500 hover:text-slate-300"
-                    )}
-                >
-                    <Layers className="h-3.5 w-3.5" /> Manual
+             <div className="grid grid-cols-3 border-b border-slate-800">
+                <button onClick={() => setExecutionMode('MANUAL')} className={cn("p-3 text-xs font-bold transition-colors border-b-2", executionMode === 'MANUAL' ? "text-white border-green-500 bg-slate-800" : "text-slate-500 border-transparent hover:text-slate-300")}>
+                    <Layers className="h-4 w-4 mx-auto mb-1" /> MANUAL
                 </button>
-                <button 
-                    onClick={() => setExecutionMode('AUTO')}
-                    className={cn(
-                        "p-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors",
-                        executionMode === 'AUTO' ? "bg-slate-800 text-white border-b-2 border-yellow-500" : "bg-slate-950 text-slate-500 hover:text-slate-300"
-                    )}
-                >
-                    <Bot className="h-3.5 w-3.5" /> Auto Bot
+                <button onClick={() => setExecutionMode('AUTO')} className={cn("p-3 text-xs font-bold transition-colors border-b-2", executionMode === 'AUTO' ? "text-white border-yellow-500 bg-slate-800" : "text-slate-500 border-transparent hover:text-slate-300")}>
+                    <Bot className="h-4 w-4 mx-auto mb-1" /> BOT
+                </button>
+                <button onClick={() => setExecutionMode('SCANNER')} className={cn("p-3 text-xs font-bold transition-colors border-b-2", executionMode === 'SCANNER' ? "text-white border-purple-500 bg-slate-800" : "text-slate-500 border-transparent hover:text-slate-300")}>
+                    <Trophy className="h-4 w-4 mx-auto mb-1" /> RANK
                 </button>
              </div>
 
@@ -511,51 +505,13 @@ export function DashboardView() {
                         <div className="space-y-4">
                             <label className="text-xs font-bold text-slate-500 uppercase">Valor da Entrada</label>
                             <div className="relative group">
-                                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 group-focus-within:text-green-500 transition-colors" />
-                                <input 
-                                    type="number" 
-                                    value={stake} 
-                                    onChange={(e) => setStake(Number(e.target.value))} 
-                                    className="w-full h-14 pl-10 pr-4 bg-slate-950 border border-slate-800 rounded-xl text-2xl font-black text-slate-200 focus:outline-none focus:ring-2 focus:ring-green-500/50 transition-all placeholder-slate-700"
-                                />
-                            </div>
-                            <div className="flex justify-between text-xs font-medium text-slate-500 px-1">
-                                <span>Min: $0.35</span>
-                                <span>Payout: <span className="text-green-500 font-bold">95%</span></span>
+                                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500" />
+                                <input type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} className="w-full h-14 pl-10 pr-4 bg-slate-950 border border-slate-800 rounded-xl text-2xl font-black text-slate-200 focus:outline-none focus:ring-2 focus:ring-green-500/50" />
                             </div>
                         </div>
-
-                        <div className="bg-green-500/5 border border-green-500/20 p-4 rounded-xl text-center space-y-1">
-                            <span className="text-xs font-bold text-green-600/80 uppercase">Lucro Previsto</span>
-                            <div className="text-3xl font-black text-green-500 tracking-tight drop-shadow-[0_0_10px_rgba(34,197,94,0.2)]">+{formatCurrency(stake * 0.95)}</div>
-                        </div>
-
                         <div className="flex-1 grid grid-rows-2 gap-3 mt-4">
-                            <Button 
-                                className={cn(
-                                    "h-full text-xl font-black flex flex-col items-center justify-center gap-1 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-[0.98]",
-                                    analysis?.direction === 'CALL' 
-                                        ? "bg-green-600 hover:bg-green-500 text-white shadow-[0_0_20px_rgba(22,163,74,0.3)] border border-green-400/50" 
-                                        : "bg-slate-800 text-slate-500 hover:bg-slate-700 border border-slate-700"
-                                )}
-                                onClick={() => handleTrade('CALL')}
-                                disabled={isManualLocked}
-                            >
-                                <span className="flex items-center gap-2">CALL <TrendingUp className="h-5 w-5" /></span>
-                            </Button>
-
-                            <Button 
-                                className={cn(
-                                    "h-full text-xl font-black flex flex-col items-center justify-center gap-1 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-[0.98]",
-                                    analysis?.direction === 'PUT' 
-                                        ? "bg-red-600 hover:bg-red-500 text-white shadow-[0_0_20px_rgba(220,38,38,0.3)] border border-red-400/50" 
-                                        : "bg-slate-800 text-slate-500 hover:bg-slate-700 border border-slate-700"
-                                )}
-                                onClick={() => handleTrade('PUT')}
-                                disabled={isManualLocked}
-                            >
-                                <span className="flex items-center gap-2">PUT <TrendingDown className="h-5 w-5" /></span>
-                            </Button>
+                            <Button className="h-full bg-green-600 hover:bg-green-500 text-xl font-black" onClick={() => handleTrade('CALL')}>CALL</Button>
+                            <Button className="h-full bg-red-600 hover:bg-red-500 text-xl font-black" onClick={() => handleTrade('PUT')}>PUT</Button>
                         </div>
                     </div>
                 )}
@@ -563,133 +519,93 @@ export function DashboardView() {
                 {/* --- MODO AUTOMÁTICO --- */}
                 {executionMode === 'AUTO' && (
                     <div className="space-y-6 flex-1 flex flex-col">
-                        <div className={cn(
-                            "border rounded-lg p-3 text-xs mb-2 transition-colors",
-                            botStatus === 'RUNNING' ? "bg-green-500/10 border-green-500/20 text-green-400" :
-                            botStatus === 'WAITING_SCHEDULE' ? "bg-blue-500/10 border-blue-500/20 text-blue-400" :
-                            botStatus === 'STOPPED_BY_RISK' ? "bg-red-500/10 border-red-500/20 text-red-400" :
-                            "bg-slate-800/50 border-slate-700 text-slate-400"
-                        )}>
-                            <p className="font-bold flex items-center gap-2">
-                                {botStatus === 'RUNNING' && <Activity className="h-3.5 w-3.5 animate-pulse" />}
-                                {botStatus === 'WAITING_SCHEDULE' && <Timer className="h-3.5 w-3.5" />}
-                                {botStatus === 'STOPPED_BY_RISK' && <ShieldAlert className="h-3.5 w-3.5" />}
-                                {botStatus === 'IDLE' && <Bot className="h-3.5 w-3.5" />}
-                                Status: 
-                                {botStatus === 'RUNNING' && " Operando Sniper"}
-                                {botStatus === 'WAITING_SCHEDULE' && " Aguardando Horário"}
-                                {botStatus === 'STOPPED_BY_RISK' && " Bloqueado por Risco"}
-                                {botStatus === 'IDLE' && " Parado"}
-                            </p>
+                        <div className={cn("border rounded-lg p-3 text-xs mb-2 flex items-center gap-2", botStatus === 'RUNNING' ? "bg-green-500/10 border-green-500/20 text-green-400" : "bg-slate-800/50 border-slate-700 text-slate-400")}>
+                            {botStatus === 'RUNNING' ? <Activity className="h-3 w-3 animate-pulse" /> : <Bot className="h-3 w-3" />}
+                            <span className="font-bold">Status: {botStatus}</span>
                         </div>
 
-                        {/* CONFIGURAÇÃO DE RISCO */}
-                        <div className="space-y-4 border-b border-slate-800 pb-4">
-                            <h4 className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
-                                <ShieldAlert className="h-3 w-3" /> Gestão de Risco
-                            </h4>
-                            <div className="space-y-2">
-                                <label className="text-xs text-slate-300">Risco por Operação (Stake Fixa)</label>
-                                <div className="relative">
-                                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-                                    <input 
-                                        type="number" 
-                                        value={autoSettings.stake}
-                                        disabled={isAutoRunning}
-                                        onChange={(e) => setAutoSettings({...autoSettings, stake: Number(e.target.value)})} 
-                                        className="w-full h-10 pl-9 pr-3 bg-slate-950 border border-slate-800 rounded-lg font-bold text-white focus:ring-yellow-500/50 disabled:opacity-50"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div className="space-y-1">
-                                    <label className="text-xs text-slate-300">Stop Loss Global</label>
-                                    <input 
-                                        type="number" 
-                                        value={Math.abs(autoSettings.stopLoss)}
-                                        disabled={isAutoRunning}
-                                        onChange={(e) => setAutoSettings({...autoSettings, stopLoss: -Math.abs(Number(e.target.value))})} 
-                                        className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg font-bold text-red-400 focus:ring-yellow-500/50 disabled:opacity-50"
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs text-slate-300">Stop Win Global</label>
-                                    <input 
-                                        type="number" 
-                                        value={autoSettings.stopWin}
-                                        disabled={isAutoRunning}
-                                        onChange={(e) => setAutoSettings({...autoSettings, stopWin: Number(e.target.value)})} 
-                                        className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg font-bold text-green-400 focus:ring-yellow-500/50 disabled:opacity-50"
-                                    />
-                                </div>
-                            </div>
+                        {/* SELETOR DE ESTRATÉGIA DE STOP */}
+                        <div className="bg-slate-950 p-1 rounded-lg grid grid-cols-2 border border-slate-800">
+                            <button onClick={() => setStopMode('FINANCIAL')} className={cn("py-1.5 text-[10px] font-bold rounded uppercase", stopMode === 'FINANCIAL' ? "bg-slate-800 text-white shadow-sm" : "text-slate-500")}>$ Financeiro</button>
+                            <button onClick={() => setStopMode('QUANTITY')} className={cn("py-1.5 text-[10px] font-bold rounded uppercase", stopMode === 'QUANTITY' ? "bg-slate-800 text-white shadow-sm" : "text-slate-500")}># Quantidade</button>
                         </div>
+
+                        {stopMode === 'FINANCIAL' ? (
+                            <div className="grid grid-cols-2 gap-3 animate-in slide-in-from-left-2">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-400 uppercase">Stop Loss ($)</label>
+                                    <input type="number" value={Math.abs(autoSettings.stopLoss)} onChange={(e) => setAutoSettings({...autoSettings, stopLoss: -Math.abs(Number(e.target.value))})} className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-red-400 font-bold" />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-400 uppercase">Stop Win ($)</label>
+                                    <input type="number" value={autoSettings.stopWin} onChange={(e) => setAutoSettings({...autoSettings, stopWin: Number(e.target.value)})} className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-green-400 font-bold" />
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-1 animate-in slide-in-from-right-2">
+                                <label className="text-[10px] text-slate-400 uppercase">Máximo de Operações</label>
+                                <input type="number" value={autoSettings.maxTrades} onChange={(e) => setAutoSettings({...autoSettings, maxTrades: Number(e.target.value)})} className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-white font-bold" />
+                            </div>
+                        )}
 
                         {/* SCHEDULER */}
-                        <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                                <h4 className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
-                                    <CalendarClock className="h-3 w-3" /> Agendamento
-                                </h4>
+                        <div className="space-y-3 pt-4 border-t border-slate-800">
+                             <div className="flex items-center justify-between">
+                                <h4 className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1"><CalendarClock className="h-3 w-3" /> Agendamento</h4>
                                 <label className="relative inline-flex items-center cursor-pointer">
-                                  <input 
-                                    type="checkbox" 
-                                    className="sr-only peer"
-                                    checked={autoSettings.scheduleEnabled}
-                                    onChange={(e) => setAutoSettings({...autoSettings, scheduleEnabled: e.target.checked})}
-                                    disabled={isAutoRunning}
-                                  />
-                                  <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-500"></div>
+                                  <input type="checkbox" checked={autoSettings.scheduleEnabled} onChange={(e) => setAutoSettings({...autoSettings, scheduleEnabled: e.target.checked})} className="sr-only peer" />
+                                  <div className="w-7 h-4 bg-slate-800 rounded-full peer peer-checked:bg-yellow-500 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                 </label>
                             </div>
                             
                             {autoSettings.scheduleEnabled && (
-                                <div className="grid grid-cols-2 gap-3 animate-in slide-in-from-top-2 duration-300">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] text-slate-400">Início</label>
-                                        <input 
-                                            type="time" 
-                                            value={autoSettings.startTime}
-                                            disabled={isAutoRunning}
-                                            onChange={(e) => setAutoSettings({...autoSettings, startTime: e.target.value})}
-                                            className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-sm text-white focus:ring-yellow-500/50"
-                                        />
+                                <div className="space-y-3">
+                                    <div className="flex justify-between gap-1">
+                                        {['D','S','T','Q','Q','S','S'].map((day, idx) => (
+                                            <button key={idx} onClick={() => toggleDay(idx)} className={cn("w-6 h-6 rounded-full text-[10px] font-bold flex items-center justify-center transition-all", autoSettings.activeDays.includes(idx) ? "bg-yellow-500 text-slate-900" : "bg-slate-800 text-slate-500 hover:bg-slate-700")}>{day}</button>
+                                        ))}
                                     </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] text-slate-400">Fim</label>
-                                        <input 
-                                            type="time" 
-                                            value={autoSettings.endTime}
-                                            disabled={isAutoRunning}
-                                            onChange={(e) => setAutoSettings({...autoSettings, endTime: e.target.value})}
-                                            className="w-full h-9 px-2 bg-slate-950 border border-slate-800 rounded text-sm text-white focus:ring-yellow-500/50"
-                                        />
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input type="time" value={autoSettings.startTime} onChange={(e) => setAutoSettings({...autoSettings, startTime: e.target.value})} className="bg-slate-950 border border-slate-800 rounded text-xs px-2 py-1 text-white" />
+                                        <input type="time" value={autoSettings.endTime} onChange={(e) => setAutoSettings({...autoSettings, endTime: e.target.value})} className="bg-slate-950 border border-slate-800 rounded text-xs px-2 py-1 text-white" />
                                     </div>
                                 </div>
                             )}
                         </div>
 
-                        <div className="flex-1 flex flex-col justify-end gap-3 mt-4">
-                            <Button 
-                                className={cn(
-                                    "h-14 text-lg font-black flex items-center justify-center gap-2 rounded-xl shadow-lg transition-all",
-                                    isAutoRunning 
-                                        ? "bg-red-600 hover:bg-red-700 text-white animate-pulse" 
-                                        : "bg-yellow-500 hover:bg-yellow-600 text-slate-900"
-                                )}
-                                onClick={() => setIsAutoRunning(!isAutoRunning)}
-                                disabled={isAutoLocked && !isAutoRunning}
-                            >
-                                {isAutoRunning ? (
-                                    <>PAUSAR BOT <Pause className="h-5 w-5 fill-current" /></>
-                                ) : (
-                                    <>
-                                        {autoSettings.scheduleEnabled ? 'AGENDAR BOT' : 'INICIAR BOT'}
-                                        <Play className="h-5 w-5 fill-current" />
-                                    </>
-                                )}
-                            </Button>
+                        <Button className={cn("mt-auto h-12 font-black", isAutoRunning ? "bg-red-600 hover:bg-red-700 animate-pulse" : "bg-yellow-500 hover:bg-yellow-600 text-slate-900")} onClick={() => setIsAutoRunning(!isAutoRunning)}>
+                            {isAutoRunning ? "PARAR BOT" : "INICIAR BOT"}
+                        </Button>
+                    </div>
+                )}
+
+                {/* --- MODO SCANNER --- */}
+                {executionMode === 'SCANNER' && (
+                    <div className="space-y-4">
+                        <div className="bg-purple-500/10 border border-purple-500/20 p-3 rounded-lg text-xs text-purple-300">
+                            <h4 className="font-bold flex items-center gap-2 mb-1"><Zap className="h-3 w-3" /> Scanner em Tempo Real</h4>
+                            <p className="opacity-70">A IA analisa todos os ativos e rankeia as melhores oportunidades agora.</p>
+                        </div>
+
+                        <div className="space-y-2">
+                            {marketRanking.length === 0 ? (
+                                <div className="text-center py-10 text-slate-500 text-xs">Escaneando mercado...</div>
+                            ) : (
+                                marketRanking.map((rank, idx) => (
+                                    <div key={rank.id} onClick={() => setActiveAsset(AVAILABLE_ASSETS.find(a => a.id === rank.id) || AVAILABLE_ASSETS[0])} className="group bg-slate-950 border border-slate-800 hover:border-purple-500/50 p-3 rounded-lg cursor-pointer transition-all flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <span className={cn("text-xs font-black w-5 h-5 flex items-center justify-center rounded bg-slate-800 text-slate-400", idx === 0 && "bg-yellow-500 text-slate-900")}>#{idx + 1}</span>
+                                            <div>
+                                                <p className="text-xs font-bold text-white group-hover:text-purple-400 transition-colors">{rank.name}</p>
+                                                <p className="text-[10px] text-slate-500 flex items-center gap-1">Win Rate: <span className="text-green-400">{rank.winRate}%</span></p>
+                                            </div>
+                                        </div>
+                                        <div className={cn("text-[10px] font-bold px-2 py-1 rounded", rank.direction === 'CALL' ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500")}>
+                                            {rank.direction}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </div>
                 )}
