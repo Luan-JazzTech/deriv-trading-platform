@@ -98,7 +98,7 @@ export class DerivAPI {
             if (data.msg_type === 'tick' && this.onTickCallback) {
                 this.onTickCallback(data.tick);
             }
-            if (data.msg_type === 'balance' && this.onBalanceCallback) {
+            if (data.msg_type === 'balance' && this.onBalanceCallback && data.balance) {
                 this.onBalanceCallback(data.balance);
             }
           } catch (e) {

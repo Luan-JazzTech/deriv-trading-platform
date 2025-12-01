@@ -120,21 +120,27 @@ export function DashboardView() {
             
             if (!mounted) return;
 
-            if (authResponse) {
+            if (authResponse && authResponse.authorize) {
                 setIsConnected(true);
-                if (authResponse.authorize) {
-                    setAccountInfo({
-                        balance: authResponse.authorize.balance,
-                        currency: authResponse.authorize.currency,
-                        isVirtual: !!authResponse.authorize.is_virtual,
-                        email: authResponse.authorize.email
-                    });
+                // Proteção: Verifica se as propriedades existem antes de setar
+                const balance = typeof authResponse.authorize.balance === 'number' ? authResponse.authorize.balance : 0;
+                
+                setAccountInfo({
+                    balance: balance,
+                    currency: authResponse.authorize.currency || 'USD',
+                    isVirtual: !!authResponse.authorize.is_virtual,
+                    email: authResponse.authorize.email || ''
+                });
 
-                    derivApi.subscribeBalance((data) => {
-                        if (!mounted) return;
-                        setAccountInfo(prev => prev ? { ...prev, balance: data.balance, currency: data.currency } : null);
-                    });
-                }
+                derivApi.subscribeBalance((data) => {
+                    if (!mounted || !data) return;
+                    // Proteção extra no callback
+                    setAccountInfo(prev => prev ? { 
+                        ...prev, 
+                        balance: typeof data.balance === 'number' ? data.balance : prev.balance, 
+                        currency: data.currency || prev.currency 
+                    } : null);
+                });
             }
         } catch (e) {
             console.error("Falha ao conectar Deriv:", e);
@@ -166,6 +172,8 @@ export function DashboardView() {
 
     // 2. Assina Ticks em Tempo Real para atualizar vela atual
     derivApi.subscribeTicks(activeAsset.id, (tick) => {
+        if (!tick || typeof tick.quote !== 'number') return;
+        
         const price = tick.quote;
         const time = tick.epoch * 1000;
         setCurrentPrice(price);
@@ -338,7 +346,7 @@ export function DashboardView() {
     if (!candles || candles.length === 0) return <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-pulse gap-2"><Activity className="h-8 w-8" />Carregando Gráfico Deriv...</div>;
     
     // Proteção contra valores NaN/Undefined
-    const safeCandles = candles.filter(c => c && !isNaN(c.high) && !isNaN(c.low));
+    const safeCandles = candles.filter(c => c && typeof c.high === 'number' && !isNaN(c.high) && !isNaN(c.low));
     if (safeCandles.length < 2) return <div className="h-full flex flex-col items-center justify-center text-slate-500">Dados insuficientes...</div>;
 
     const minPrice = Math.min(...safeCandles.map(c => c.low));
@@ -348,7 +356,7 @@ export function DashboardView() {
     const width = 800; const height = 350; const padding = 40; const usableHeight = height - (padding * 2);
     const candleWidth = (width / Math.max(safeCandles.length, 1)) * 0.7;
     const spacing = (width / Math.max(safeCandles.length, 1));
-    const formatPrice = (p: number) => p.toFixed(activeAsset.decimals);
+    const formatPrice = (p: number) => typeof p === 'number' ? p.toFixed(activeAsset.decimals) : '0.00';
 
     return (
       <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} className="overflow-visible preserve-3d bg-[#0B1120] rounded-lg">
@@ -366,7 +374,7 @@ export function DashboardView() {
 
         {safeCandles.map((candle, index) => {
           const normalizeY = (val: number) => {
-             const safeVal = isNaN(val) ? minPrice : val;
+             const safeVal = (typeof val === 'number' && !isNaN(val)) ? val : minPrice;
              return height - padding - ((safeVal - minPrice) / priceRange) * usableHeight;
           };
 
@@ -429,11 +437,11 @@ export function DashboardView() {
                 </div>
              ) : (
                 <>
-                    <div className={cn("px-4 py-2 flex items-center gap-2 border-r border-slate-800", accountInfo.isVirtual ? "text-orange-400" : "text-green-400")}>
+                    <div className={cn("px-4 py-2 flex items-center gap-2 border-r border-slate-800", accountInfo?.isVirtual ? "text-orange-400" : "text-green-400")}>
                         <Wallet className="h-4 w-4" />
                         <div className="flex flex-col leading-none">
-                            <span className="text-[10px] uppercase font-bold text-slate-500">{accountInfo.isVirtual ? 'DEMO' : 'REAL'}</span>
-                            <span className="text-sm font-bold">{formatCurrency(accountInfo.balance)}</span>
+                            <span className="text-[10px] uppercase font-bold text-slate-500">{accountInfo?.isVirtual ? 'DEMO' : 'REAL'}</span>
+                            <span className="text-sm font-bold">{formatCurrency(accountInfo?.balance || 0)}</span>
                         </div>
                     </div>
                     <div className="px-3 py-2 flex items-center gap-2 text-green-500">
