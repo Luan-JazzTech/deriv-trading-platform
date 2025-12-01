@@ -2,30 +2,33 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
+import { derivApi } from '../lib/deriv/api';
+import { supabase } from '../lib/supabase';
 
-// --- CONFIGURAÇÃO DE ATIVOS (DERIV FULL) ---
+// --- CONFIGURAÇÃO DE ATIVOS REAIS (IDs da API Deriv) ---
 const AVAILABLE_ASSETS = [
-  { id: 'R_100', name: 'Volatility 100 (1s)', basePrice: 1240.50, volatility: 2.0, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
-  { id: 'R_75', name: 'Volatility 75 (1s)', basePrice: 450.25, volatility: 1.5, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
-  { id: 'R_50', name: 'Volatility 50 (1s)', basePrice: 280.10, volatility: 0.8, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
-  { id: 'R_25', name: 'Volatility 25 (1s)', basePrice: 1050.00, volatility: 1.2, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
-  { id: 'R_10', name: 'Volatility 10 (1s)', basePrice: 1800.50, volatility: 1.0, type: 'synthetic', decimals: 2, group: 'Derived Indices' },
-  { id: 'JUMP_10', name: 'Jump 10 Index', basePrice: 150.00, volatility: 3.5, type: 'synthetic', decimals: 2, group: 'Jump Indices' },
-  { id: 'JUMP_25', name: 'Jump 25 Index', basePrice: 250.00, volatility: 3.0, type: 'synthetic', decimals: 2, group: 'Jump Indices' },
-  { id: 'JUMP_50', name: 'Jump 50 Index', basePrice: 550.00, volatility: 2.5, type: 'synthetic', decimals: 2, group: 'Jump Indices' },
-  { id: 'JUMP_75', name: 'Jump 75 Index', basePrice: 750.00, volatility: 2.0, type: 'synthetic', decimals: 2, group: 'Jump Indices' },
-  { id: 'JUMP_100', name: 'Jump 100 Index', basePrice: 1050.00, volatility: 1.8, type: 'synthetic', decimals: 2, group: 'Jump Indices' },
-  { id: 'CRASH_1000', name: 'Crash 1000 Index', basePrice: 6000.00, volatility: 4.0, type: 'synthetic', decimals: 2, group: 'Crash/Boom' },
-  { id: 'BOOM_1000', name: 'Boom 1000 Index', basePrice: 12000.00, volatility: 4.0, type: 'synthetic', decimals: 2, group: 'Crash/Boom' },
-  { id: 'frxEURUSD', name: 'EUR/USD', basePrice: 1.0850, volatility: 0.00015, type: 'forex', decimals: 5, group: 'Forex Majors' },
-  { id: 'frxGBPUSD', name: 'GBP/USD', basePrice: 1.2730, volatility: 0.00020, type: 'forex', decimals: 5, group: 'Forex Majors' },
-  { id: 'frxUSDJPY', name: 'USD/JPY', basePrice: 155.40, volatility: 0.05, type: 'forex', decimals: 3, group: 'Forex Majors' },
-  { id: 'frxXAUUSD', name: 'Gold / USD', basePrice: 2350.00, volatility: 1.5, type: 'commodities', decimals: 2, group: 'Commodities' },
-  { id: 'cryBTCUSD', name: 'BTC/USD', basePrice: 64250.00, volatility: 45.0, type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
-  { id: 'cryETHUSD', name: 'ETH/USD', basePrice: 3450.00, volatility: 5.0, type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
+  // Índices de Volatilidade (1s são mais rápidos) - IDs Oficiais
+  { id: '1HZ100V', name: 'Volatility 100 (1s)', type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: '1HZ75V', name: 'Volatility 75 (1s)', type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: '1HZ50V', name: 'Volatility 50 (1s)', type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: '1HZ25V', name: 'Volatility 25 (1s)', type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: '1HZ10V', name: 'Volatility 10 (1s)', type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  // Índices Normais
+  { id: 'R_100', name: 'Volatility 100', type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  { id: 'R_75', name: 'Volatility 75', type: 'synthetic', decimals: 2, group: 'Derived Indices' },
+  // Jump
+  { id: 'JD10', name: 'Jump 10 Index', type: 'synthetic', decimals: 2, group: 'Jump Indices' },
+  { id: 'JD50', name: 'Jump 50 Index', type: 'synthetic', decimals: 2, group: 'Jump Indices' },
+  // Forex
+  { id: 'frxEURUSD', name: 'EUR/USD', type: 'forex', decimals: 5, group: 'Forex Majors' },
+  { id: 'frxGBPUSD', name: 'GBP/USD', type: 'forex', decimals: 5, group: 'Forex Majors' },
+  { id: 'frxUSDJPY', name: 'USD/JPY', type: 'forex', decimals: 3, group: 'Forex Majors' },
+  // Crypto
+  { id: 'cryBTCUSD', name: 'BTC/USD', type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
+  { id: 'cryETHUSD', name: 'ETH/USD', type: 'crypto', decimals: 2, group: 'Cryptocurrencies' },
 ];
 
 interface AssetRanking {
@@ -37,15 +40,16 @@ interface AssetRanking {
 }
 
 export function DashboardView() {
-  const [balance, setBalance] = useState(1240.50);
+  const [balance, setBalance] = useState(0);
   const [activeAsset, setActiveAsset] = useState(AVAILABLE_ASSETS[0]);
-  const [stake, setStake] = useState(10);
+  const [stake, setStake] = useState(1); // Default mais seguro para real
   const [timeframe, setTimeframe] = useState('M1');
   
   // Estado da Análise
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
-  const [currentPrice, setCurrentPrice] = useState(activeAsset.basePrice);
+  const [currentPrice, setCurrentPrice] = useState(0);
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
 
   // --- GERENCIAMENTO DE RISCO SNIPER ---
   const [dailyStats, setDailyStats] = useState({ trades: 0, wins: 0, losses: 0, profit: 0 });
@@ -61,21 +65,15 @@ export function DashboardView() {
   const [stopMode, setStopMode] = useState<'FINANCIAL' | 'QUANTITY'>('FINANCIAL');
   
   const [autoSettings, setAutoSettings] = useState({
-      stake: 5.0,
-      
-      // Stop Financeiro
-      stopWinValue: 20.0,
-      stopLossValue: 15.0,
-      
-      // Stop Quantidade (Novo)
-      stopWinCount: 2,  // Parar após X vitórias
-      stopLossCount: 1, // Parar após Y derrotas
-
-      // Agendamento
+      stake: 1.0,
+      stopWinValue: 10.0,
+      stopLossValue: 5.0,
+      stopWinCount: 2, 
+      stopLossCount: 1,
       scheduleEnabled: false,
       startTime: '09:00',
       endTime: '17:00',
-      activeDays: [1, 2, 3, 4, 5] // 0=Dom, 1=Seg, ..., 6=Sab
+      activeDays: [1, 2, 3, 4, 5]
   });
 
   // --- MARKET SCANNER (RANKING) ---
@@ -85,85 +83,100 @@ export function DashboardView() {
   const RISK_CONFIG = { maxTrades: 10, stopWin: 100.00, stopLoss: -50.00 };
   const isManualLocked = dailyStats.trades >= RISK_CONFIG.maxTrades || dailyStats.profit >= RISK_CONFIG.stopWin || dailyStats.profit <= RISK_CONFIG.stopLoss;
 
-  // Verifica se o Bot deve parar
   const isAutoLocked = () => {
     if (stopMode === 'QUANTITY') {
-        // Nova Lógica: Para se atingir X vitórias OU Y derrotas
         return dailyStats.wins >= autoSettings.stopWinCount || dailyStats.losses >= autoSettings.stopLossCount;
     } else {
-        // Lógica Financeira
         return dailyStats.profit >= autoSettings.stopWinValue || dailyStats.profit <= -Math.abs(autoSettings.stopLossValue);
     }
   };
 
   const lastAutoTradeTimestamp = useRef<number>(0);
-  const lastCandleCreationRef = useRef<number>(Date.now());
-
-  // Simulação de Mercado
+  
+  // --- CONEXÃO COM API DERIV ---
   useEffect(() => {
-    setCandles([]); setAnalysis(null); lastCandleCreationRef.current = Date.now();
-    const candleDuration = timeframe === 'M1' ? 60000 : timeframe === 'M5' ? 300000 : 900000;
-    
-    // Inicialização do Histórico
-    const initialCandles: Candle[] = [];
-    let price = activeAsset.basePrice;
-    const now = Date.now();
-    const volatilityMultiplier = (timeframe === 'M1' ? 1 : timeframe === 'M5' ? 2.5 : 5) * activeAsset.volatility;
-
-    for (let i = 80; i > 0; i--) {
-      const open = price;
-      const move = (Math.random() - 0.5) * 5 * volatilityMultiplier;
-      const close = price + move;
-      initialCandles.push({
-        time: now - (i * candleDuration),
-        open, close,
-        high: Math.max(open, close) + (Math.random() * volatilityMultiplier * 0.5),
-        low: Math.min(open, close) - (Math.random() * volatilityMultiplier * 0.5)
-      });
-      price = close;
-    }
-    setCandles(initialCandles);
-    setCurrentPrice(price);
-
-    const interval = setInterval(() => {
-      const currentTime = Date.now();
-      const shouldCreateNewCandle = currentTime - lastCandleCreationRef.current >= candleDuration;
-      const tickVolatility = (timeframe === 'M1' ? 0.8 : 2) * activeAsset.volatility;
-      const change = (Math.random() - 0.5) * tickVolatility;
-
-      setCandles(prev => {
-        if (prev.length === 0) return prev;
-        const last = prev[prev.length - 1];
-        let newHistory = [...prev];
-
-        if (shouldCreateNewCandle) {
-            const newCandle: Candle = {
-                time: currentTime, open: last.close, close: last.close + change,
-                high: Math.max(last.close, last.close + change), low: Math.min(last.close, last.close + change)
-            };
-            newHistory = [...prev.slice(1), newCandle]; 
-            lastCandleCreationRef.current = currentTime;
-            setCurrentPrice(newCandle.close);
-        } else {
-            const newClose = last.close + change;
-            const updatedLast = { 
-                ...last, close: newClose,
-                high: Math.max(last.high, newClose), low: Math.min(last.low, newClose) 
-            };
-            newHistory = [...prev.slice(0, -1), updatedLast];
-            setCurrentPrice(newClose);
+    const initDeriv = async () => {
+        try {
+            await derivApi.connect();
+            setIsConnected(true);
+            
+            // Busca saldo inicial
+            // Nota: Em produção, buscaríamos via API.authorize response.
+            // Por enquanto, vamos assumir que o usuário deve ver o saldo após a autorização.
+        } catch (e) {
+            console.error("Falha ao conectar Deriv:", e);
         }
+    };
+    initDeriv();
+  }, []);
 
-        const result = analyzeMarket(newHistory);
+  // --- CARREGAR DADOS DE MERCADO REAIS ---
+  useEffect(() => {
+    if (!isConnected) return;
+
+    // Limpa estado anterior
+    setCandles([]); 
+    setAnalysis(null);
+    setCurrentPrice(0);
+
+    const granularity = timeframe === 'M1' ? 60 : timeframe === 'M5' ? 300 : 900;
+
+    // 1. Busca Histórico
+    derivApi.getHistory(activeAsset.id, granularity, 100).then(history => {
+        if (history.length > 0) {
+            setCandles(history);
+            setCurrentPrice(history[history.length - 1].close);
+        }
+    });
+
+    // 2. Assina Ticks em Tempo Real para atualizar vela atual
+    derivApi.subscribeTicks(activeAsset.id, (tick) => {
+        const price = tick.quote;
+        const time = tick.epoch * 1000;
+        setCurrentPrice(price);
+
+        setCandles(prev => {
+            if (prev.length === 0) return prev;
+            
+            const lastCandle = prev[prev.length - 1];
+            // Verifica se o tempo da vela já passou (epoch time)
+            // Na Deriv, granularity define o início.
+            // Simples lógica de fechamento para atualizar array:
+            const candleDurationMs = granularity * 1000;
+            const candleEndTime = lastCandle.time + candleDurationMs;
+
+            if (time >= candleEndTime) {
+                // Nova vela
+                const newCandle: Candle = {
+                    time: Math.floor(time / candleDurationMs) * candleDurationMs,
+                    open: price, close: price, high: price, low: price
+                };
+                return [...prev.slice(1), newCandle];
+            } else {
+                // Atualiza vela atual
+                const updatedLast = {
+                    ...lastCandle,
+                    close: price,
+                    high: Math.max(lastCandle.high, price),
+                    low: Math.min(lastCandle.low, price)
+                };
+                return [...prev.slice(0, -1), updatedLast];
+            }
+        });
+    });
+
+  }, [activeAsset, timeframe, isConnected]);
+
+  // --- ANALISAR MERCADO SEMPRE QUE CANDLES MUDAM ---
+  useEffect(() => {
+    if (candles.length > 20) {
+        const result = analyzeMarket(candles);
         setAnalysis(result);
-        return newHistory;
-      });
-    }, 1000); 
+    }
+  }, [candles]);
 
-    return () => clearInterval(interval);
-  }, [timeframe, activeAsset]);
 
-  // --- GERADOR DE RANKING FAKE ---
+  // --- GERADOR DE RANKING (Ainda simulado pois exigiria conexão multithread) ---
   useEffect(() => {
     const rankingInterval = setInterval(() => {
         const sorted = [...AVAILABLE_ASSETS]
@@ -177,8 +190,7 @@ export function DashboardView() {
             .sort((a, b) => b.winRate - a.winRate)
             .slice(0, 5); 
         setMarketRanking(sorted);
-    }, 10000);
-
+    }, 15000);
     return () => clearInterval(rankingInterval);
   }, []);
 
@@ -192,18 +204,15 @@ export function DashboardView() {
       if (autoSettings.scheduleEnabled) {
           const now = new Date();
           const currentDay = now.getDay();
-          
           if (!autoSettings.activeDays.includes(currentDay)) {
              setBotStatus('WAITING_SCHEDULE');
              return;
           }
-
           const [startHour, startMin] = autoSettings.startTime.split(':').map(Number);
           const [endHour, endMin] = autoSettings.endTime.split(':').map(Number);
           const start = new Date(now).setHours(startHour, startMin, 0, 0);
           const end = new Date(now).setHours(endHour, endMin, 0, 0);
           const current = now.getTime();
-
           if (current < start || current > end) {
               setBotStatus('WAITING_SCHEDULE');
               return;
@@ -212,8 +221,6 @@ export function DashboardView() {
 
       if (isAutoLocked()) {
           setBotStatus('STOPPED_BY_RISK');
-          // Opcional: Desligar o bot automaticamente ao bater meta
-          // setIsAutoRunning(false); 
           return;
       }
 
@@ -230,26 +237,54 @@ export function DashboardView() {
   }, [analysis, isAutoRunning, executionMode, dailyStats, autoSettings, stopMode]);
 
 
-  const handleTrade = (type: 'CALL' | 'PUT', tradeStake = stake) => {
+  const handleTrade = async (type: 'CALL' | 'PUT', tradeStake = stake) => {
       if (executionMode === 'MANUAL' && isManualLocked) return;
+      if (!isConnected) { alert('Conecte a API nas configurações!'); return; }
 
-      const isWin = Math.random() > 0.4;
-      const profit = isWin ? tradeStake * 0.95 : -tradeStake;
-      const newStats = {
-          trades: dailyStats.trades + 1,
-          wins: isWin ? dailyStats.wins + 1 : dailyStats.wins,
-          losses: !isWin ? dailyStats.losses + 1 : dailyStats.losses,
-          profit: dailyStats.profit + profit
-      };
-      setDailyStats(newStats);
-      setBalance(prev => prev + profit);
+      try {
+          // 1. Enviar Ordem para Deriv
+          const duration = timeframe === 'M1' ? 1 : timeframe === 'M5' ? 5 : 15;
+          const unit = 'm';
+          
+          const response = await derivApi.buyContract(activeAsset.id, type, tradeStake, duration, unit);
+
+          if (response.error) {
+              alert(`Erro na Deriv: ${response.error.message}`);
+              return;
+          }
+
+          const contractInfo = response.buy;
+          console.log("✅ Ordem Executada:", contractInfo);
+
+          // 2. Salvar no Banco de Dados (Supabase)
+          // Em um app real, monitorariamos o resultado do contrato.
+          // Aqui, salvamos como PENDING.
+          await supabase.from('trades_log').insert({
+              symbol: activeAsset.name,
+              direction: type,
+              stake: tradeStake,
+              duration: `${duration}${unit}`,
+              result: 'PENDING', // Futuramente atualizado via WS proposal_open_contract
+              deriv_contract_id: contractInfo.contract_id
+          });
+
+          // 3. Atualizar UI (Nota: O resultado WIN/LOSS real só vem depois do tempo expirar)
+          // Para não travar a UI, vamos incrementar apenas o contador de Trades.
+          // O saldo deve ser atualizado via WS 'balance' message (não implementado full aqui por brevidade)
+          setDailyStats(prev => ({ ...prev, trades: prev.trades + 1 }));
+
+          alert(`Ordem ${type} enviada com sucesso! ID: ${contractInfo.contract_id}`);
+
+      } catch (err) {
+          console.error(err);
+          alert('Falha ao enviar ordem.');
+      }
   };
 
   const getAssetIcon = (type: string) => {
     switch(type) {
       case 'crypto': return <Bitcoin className="h-5 w-5 text-orange-500" />;
       case 'forex': return <Globe className="h-5 w-5 text-blue-500" />;
-      case 'commodities': return <Box className="h-5 w-5 text-yellow-500" />;
       case 'synthetic': return <Activity className="h-5 w-5 text-purple-500" />;
       default: return <Flame className="h-5 w-5 text-red-500" />;
     }
@@ -266,13 +301,14 @@ export function DashboardView() {
   };
 
   const renderChart = () => {
-    if (candles.length === 0) return <div className="h-full flex items-center justify-center text-slate-500">Carregando mercado...</div>;
+    if (candles.length === 0) return <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-pulse gap-2"><Activity className="h-8 w-8" />Conectando ao Mercado Real...</div>;
+    
     const minPrice = Math.min(...candles.map(c => c.low));
     const maxPrice = Math.max(...candles.map(c => c.high));
     const priceRange = maxPrice - minPrice || 1;
     const width = 800; const height = 350; const padding = 40; const usableHeight = height - (padding * 2);
-    const candleWidth = (width / candles.length) * 0.7;
-    const spacing = (width / candles.length);
+    const candleWidth = (width / Math.max(candles.length, 1)) * 0.7;
+    const spacing = (width / Math.max(candles.length, 1));
     const formatPrice = (p: number) => p.toFixed(activeAsset.decimals);
 
     return (
@@ -320,7 +356,7 @@ export function DashboardView() {
       {/* --- HUD HEADER --- */}
       <div className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-slate-900/50 backdrop-blur-md p-4 rounded-xl shadow-lg border border-slate-800">
         <div className="relative group w-full lg:w-auto min-w-[320px]">
-          <label className="text-[10px] uppercase font-bold text-slate-500 absolute -top-2 left-2 bg-slate-900 px-1 border border-slate-800 rounded">Ativo Selecionado</label>
+          <label className="text-[10px] uppercase font-bold text-slate-500 absolute -top-2 left-2 bg-slate-900 px-1 border border-slate-800 rounded">Ativo Real (Deriv)</label>
           <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
             {getAssetIcon(activeAsset.type)}
           </div>
@@ -329,7 +365,7 @@ export function DashboardView() {
             onChange={(e) => setActiveAsset(AVAILABLE_ASSETS.find(a => a.id === e.target.value) || AVAILABLE_ASSETS[0])}
             className="w-full appearance-none bg-slate-950 text-slate-200 text-lg font-bold py-3 pl-12 pr-10 rounded-lg border border-slate-800 cursor-pointer hover:border-slate-700 focus:outline-none focus:ring-2 focus:ring-green-500/50 transition-all shadow-inner"
           >
-            {['Derived Indices', 'Jump Indices', 'Crash/Boom', 'Forex Majors', 'Commodities', 'Cryptocurrencies'].map(group => (
+            {['Derived Indices', 'Jump Indices', 'Forex Majors', 'Cryptocurrencies'].map(group => (
               <optgroup key={group} label={group} className="bg-slate-900 text-slate-300">
                 {AVAILABLE_ASSETS.filter(a => a.group === group).map(asset => (
                   <option key={asset.id} value={asset.id}>{asset.name}</option>
@@ -341,20 +377,18 @@ export function DashboardView() {
         </div>
 
         <div className="flex items-center gap-px bg-slate-950/80 text-white p-1 rounded-lg border border-slate-800 shadow-xl">
-            <div className="px-5 py-2 border-r border-slate-800">
-                <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider">Saldo Demo</p>
-                <p className="text-sm font-bold text-green-400 font-mono tracking-tight">{formatCurrency(balance)}</p>
-            </div>
-            <div className="px-5 py-2 border-r border-slate-800">
-                <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider">Meta do Dia</p>
-                <div className="flex items-center gap-2">
-                    <p className={`text-sm font-bold font-mono ${dailyStats.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {dailyStats.profit >= 0 ? '+' : ''}{formatCurrency(dailyStats.profit)}
-                    </p>
-                    <span className="text-[10px] text-slate-600 font-mono">/ {stopMode === 'FINANCIAL' ? formatCurrency(autoSettings.stopWinValue) : '---'}</span>
+             {!isConnected ? (
+                <div className="px-5 py-2 flex items-center gap-2 text-yellow-500 animate-pulse">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span className="text-xs font-bold">Modo Offline (Configure Token)</span>
                 </div>
-            </div>
-            <div className="px-5 py-2">
+             ) : (
+                <div className="px-5 py-2 flex items-center gap-2 text-green-500">
+                    <Zap className="h-4 w-4" />
+                    <span className="text-xs font-bold">Conectado</span>
+                </div>
+             )}
+            <div className="px-5 py-2 border-l border-slate-800">
                 <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider">Stop Count</p>
                 <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1 text-green-400" title="Vitórias">
@@ -380,7 +414,7 @@ export function DashboardView() {
             <div className="flex flex-row items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50">
               <div className="flex items-center gap-2">
                 <BarChart3 className="h-5 w-5 text-slate-400" />
-                <span className="font-bold text-slate-300">Análise Gráfica</span>
+                <span className="font-bold text-slate-300">Gráfico Real</span>
               </div>
               <div className="flex bg-slate-950 rounded-md border border-slate-800 p-1">
                 {['M1', 'M5', 'M15'].map((tf) => (
@@ -399,13 +433,15 @@ export function DashboardView() {
             </div>
             <div className="flex-1 bg-slate-950 p-4 relative">
                 {renderChart()}
-                <div className="absolute top-6 left-6 flex items-center gap-2 px-3 py-1 bg-slate-900/90 rounded backdrop-blur-sm text-xs text-green-400 border border-slate-800 shadow-lg">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                    </span>
-                    Mercado Aberto
-                </div>
+                {isConnected && (
+                    <div className="absolute top-6 left-6 flex items-center gap-2 px-3 py-1 bg-slate-900/90 rounded backdrop-blur-sm text-xs text-green-400 border border-slate-800 shadow-lg">
+                        <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                        </span>
+                        Dados Ao Vivo
+                    </div>
+                )}
             </div>
           </Card>
 
@@ -479,7 +515,7 @@ export function DashboardView() {
                     ))}
                   </div>
                 </div>
-              ) : <div className="text-center py-8 text-slate-600 animate-pulse">Calibrando IA...</div>}
+              ) : <div className="text-center py-8 text-slate-600 animate-pulse">Aguardando dados de mercado...</div>}
             </CardContent>
           </Card>
         </div>

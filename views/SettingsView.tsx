@@ -1,29 +1,40 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { ShieldCheck, Eye, EyeOff, CheckCircle } from 'lucide-react';
 
 export function SettingsView() {
   const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'success'>('idle');
+
+  useEffect(() => {
+    const saved = localStorage.getItem('deriv_token');
+    if (saved) setToken(saved);
+  }, []);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // Simulação de salvamento
+    
+    // Salva no LocalStorage para a API usar
+    localStorage.setItem('deriv_token', token.trim());
+
     setTimeout(() => {
       setLoading(false);
-      alert('Token salvo com segurança! (Simulação)');
-    }, 1000);
+      setStatus('success');
+      setTimeout(() => setStatus('idle'), 3000);
+    }, 500);
   };
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
         <h2 className="text-3xl font-bold tracking-tight text-white">Configurações</h2>
-        <p className="text-slate-400">Gerencie suas chaves de API e preferências de segurança.</p>
+        <p className="text-slate-400">Gerencie suas chaves de API para conexão real.</p>
       </div>
 
       <Card className="bg-slate-900 border-slate-800">
@@ -54,17 +65,13 @@ export function SettingsView() {
                 </button>
               </div>
               <p className="text-xs text-slate-500">
-                Seu token será criptografado antes de ser salvo no banco de dados.
-                Nunca compartilhe este token com ninguém.
+                Seu token é salvo localmente no navegador para acesso direto à API.
               </p>
             </div>
             
-            <div className="flex gap-4 pt-2">
+            <div className="flex gap-4 pt-2 items-center">
               <Button type="submit" isLoading={loading} className="bg-green-600 hover:bg-green-500 text-white">
-                Salvar Configuração
-              </Button>
-              <Button type="button" variant="outline" onClick={() => alert('Testando conexão...')} className="bg-transparent border-slate-700 text-slate-300 hover:bg-slate-800">
-                Testar Conexão
+                {status === 'success' ? <><CheckCircle className="mr-2 h-4 w-4"/> Salvo com Sucesso</> : 'Salvar e Conectar'}
               </Button>
             </div>
           </form>
