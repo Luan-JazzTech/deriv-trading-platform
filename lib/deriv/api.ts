@@ -5,6 +5,7 @@ export class DerivAPI {
     private appId: string = '1089'; // App ID público genérico
     private tickSubscriptionId: string | null = null;
     private onTickCallback: ((tick: any) => void) | null = null;
+    private onBalanceCallback: ((balance: any) => void) | null = null;
     
     // Controle de Requisições
     private reqIdCounter = 0;
@@ -16,10 +17,10 @@ export class DerivAPI {
       }
     }
   
-    connect(): Promise<void> {
+    connect(): Promise<any> {
       return new Promise((resolve, reject) => {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          resolve();
+          resolve(null);
           return;
         }
   
@@ -29,14 +30,13 @@ export class DerivAPI {
           console.log('✅ Conectado à Deriv WebSocket');
           if (this.token) {
             this.authorize(this.token)
-                .then(() => resolve())
+                .then((res) => resolve(res)) // Retorna os dados da conta ao conectar
                 .catch(err => {
                     console.error("Falha na autorização inicial:", err);
-                    // Resolvemos mesmo assim para permitir que o app carregue (modo guest/não autorizado para charts públicos se possível, mas history exige auth geralmente)
-                    resolve(); 
+                    resolve(null); 
                 });
           } else {
-            resolve();
+            resolve(null);
           }
         };
   
@@ -60,6 +60,11 @@ export class DerivAPI {
           if (data.msg_type === 'tick' && this.onTickCallback) {
             this.onTickCallback(data.tick);
           }
+
+          // 3. Tratamento de Streams (Saldo/Balance)
+          if (data.msg_type === 'balance' && this.onBalanceCallback) {
+            this.onBalanceCallback(data.balance);
+          }
         };
   
         this.ws.onerror = (err) => {
@@ -78,6 +83,11 @@ export class DerivAPI {
         console.log('🔓 Autorizado:', res.authorize?.email);
         return res;
       });
+    }
+
+    subscribeBalance(callback: (balanceData: any) => void) {
+        this.onBalanceCallback = callback;
+        this.send({ balance: 1, subscribe: 1 });
     }
   
     async getHistory(symbol: string, granularity: number = 60, count: number = 100) {

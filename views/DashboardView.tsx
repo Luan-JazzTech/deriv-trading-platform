@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 import { derivApi } from '../lib/deriv/api';
@@ -39,10 +39,26 @@ interface AssetRanking {
     score: number;
 }
 
+interface TradeActivity {
+    id: string;
+    asset: string;
+    time: string;
+    type: 'CALL' | 'PUT';
+    amount: number;
+    status: 'PENDING' | 'WIN' | 'LOSS';
+}
+
+interface AccountInfo {
+    balance: number;
+    currency: string;
+    isVirtual: boolean;
+    email: string;
+}
+
 export function DashboardView() {
-  const [balance, setBalance] = useState(0);
+  const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [activeAsset, setActiveAsset] = useState(AVAILABLE_ASSETS[0]);
-  const [stake, setStake] = useState(1); // Default mais seguro para real
+  const [stake, setStake] = useState(1); 
   const [timeframe, setTimeframe] = useState('M1');
   
   // Estado da Análise
@@ -53,7 +69,8 @@ export function DashboardView() {
 
   // --- GERENCIAMENTO DE RISCO SNIPER ---
   const [dailyStats, setDailyStats] = useState({ trades: 0, wins: 0, losses: 0, profit: 0 });
-  
+  const [liveTrades, setLiveTrades] = useState<TradeActivity[]>([]);
+
   // --- MODO DE EXECUÇÃO ---
   const [executionMode, setExecutionMode] = useState<'MANUAL' | 'AUTO' | 'SCANNER'>('MANUAL');
   
@@ -97,12 +114,22 @@ export function DashboardView() {
   useEffect(() => {
     const initDeriv = async () => {
         try {
-            await derivApi.connect();
+            const authResponse = await derivApi.connect();
             setIsConnected(true);
             
-            // Busca saldo inicial
-            // Nota: Em produção, buscaríamos via API.authorize response.
-            // Por enquanto, vamos assumir que o usuário deve ver o saldo após a autorização.
+            if (authResponse && authResponse.authorize) {
+                setAccountInfo({
+                    balance: authResponse.authorize.balance,
+                    currency: authResponse.authorize.currency,
+                    isVirtual: !!authResponse.authorize.is_virtual,
+                    email: authResponse.authorize.email
+                });
+
+                // Inscreve para atualizações de saldo
+                derivApi.subscribeBalance((data) => {
+                    setAccountInfo(prev => prev ? { ...prev, balance: data.balance, currency: data.currency } : null);
+                });
+            }
         } catch (e) {
             console.error("Falha ao conectar Deriv:", e);
         }
@@ -139,9 +166,6 @@ export function DashboardView() {
             if (prev.length === 0) return prev;
             
             const lastCandle = prev[prev.length - 1];
-            // Verifica se o tempo da vela já passou (epoch time)
-            // Na Deriv, granularity define o início.
-            // Simples lógica de fechamento para atualizar array:
             const candleDurationMs = granularity * 1000;
             const candleEndTime = lastCandle.time + candleDurationMs;
 
@@ -176,7 +200,7 @@ export function DashboardView() {
   }, [candles]);
 
 
-  // --- GERADOR DE RANKING (Ainda simulado pois exigiria conexão multithread) ---
+  // --- GERADOR DE RANKING (Simulado) ---
   useEffect(() => {
     const rankingInterval = setInterval(() => {
         const sorted = [...AVAILABLE_ASSETS]
@@ -242,7 +266,6 @@ export function DashboardView() {
       if (!isConnected) { alert('Conecte a API nas configurações!'); return; }
 
       try {
-          // 1. Enviar Ordem para Deriv
           const duration = timeframe === 'M1' ? 1 : timeframe === 'M5' ? 5 : 15;
           const unit = 'm';
           
@@ -254,26 +277,29 @@ export function DashboardView() {
           }
 
           const contractInfo = response.buy;
-          console.log("✅ Ordem Executada:", contractInfo);
+          
+          // Adiciona ao log visual
+          const newTrade: TradeActivity = {
+              id: contractInfo.contract_id,
+              asset: activeAsset.name,
+              time: new Date().toLocaleTimeString(),
+              type: type,
+              amount: tradeStake,
+              status: 'PENDING'
+          };
+          setLiveTrades(prev => [newTrade, ...prev]);
 
-          // 2. Salvar no Banco de Dados (Supabase)
-          // Em um app real, monitorariamos o resultado do contrato.
-          // Aqui, salvamos como PENDING.
+          // Salva no Banco de Dados
           await supabase.from('trades_log').insert({
               symbol: activeAsset.name,
               direction: type,
               stake: tradeStake,
               duration: `${duration}${unit}`,
-              result: 'PENDING', // Futuramente atualizado via WS proposal_open_contract
+              result: 'PENDING',
               deriv_contract_id: contractInfo.contract_id
           });
 
-          // 3. Atualizar UI (Nota: O resultado WIN/LOSS real só vem depois do tempo expirar)
-          // Para não travar a UI, vamos incrementar apenas o contador de Trades.
-          // O saldo deve ser atualizado via WS 'balance' message (não implementado full aqui por brevidade)
           setDailyStats(prev => ({ ...prev, trades: prev.trades + 1 }));
-
-          alert(`Ordem ${type} enviada com sucesso! ID: ${contractInfo.contract_id}`);
 
       } catch (err) {
           console.error(err);
@@ -301,7 +327,7 @@ export function DashboardView() {
   };
 
   const renderChart = () => {
-    if (candles.length === 0) return <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-pulse gap-2"><Activity className="h-8 w-8" />Conectando ao Mercado Real...</div>;
+    if (candles.length === 0) return <div className="h-full flex flex-col items-center justify-center text-slate-500 animate-pulse gap-2"><Activity className="h-8 w-8" />Carregando Gráfico Deriv...</div>;
     
     const minPrice = Math.min(...candles.map(c => c.low));
     const maxPrice = Math.max(...candles.map(c => c.high));
@@ -376,17 +402,27 @@ export function DashboardView() {
           <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 pointer-events-none" />
         </div>
 
+        {/* --- PAINEL DE CONTA (DEMO/REAL) --- */}
         <div className="flex items-center gap-px bg-slate-950/80 text-white p-1 rounded-lg border border-slate-800 shadow-xl">
-             {!isConnected ? (
+             {!isConnected || !accountInfo ? (
                 <div className="px-5 py-2 flex items-center gap-2 text-yellow-500 animate-pulse">
                     <AlertTriangle className="h-4 w-4" />
                     <span className="text-xs font-bold">Modo Offline (Configure Token)</span>
                 </div>
              ) : (
-                <div className="px-5 py-2 flex items-center gap-2 text-green-500">
-                    <Zap className="h-4 w-4" />
-                    <span className="text-xs font-bold">Conectado</span>
-                </div>
+                <>
+                    <div className={cn("px-4 py-2 flex items-center gap-2 border-r border-slate-800", accountInfo.isVirtual ? "text-orange-400" : "text-green-400")}>
+                        <Wallet className="h-4 w-4" />
+                        <div className="flex flex-col leading-none">
+                            <span className="text-[10px] uppercase font-bold text-slate-500">{accountInfo.isVirtual ? 'DEMO' : 'REAL'}</span>
+                            <span className="text-sm font-bold">{formatCurrency(accountInfo.balance)}</span>
+                        </div>
+                    </div>
+                    <div className="px-3 py-2 flex items-center gap-2 text-green-500">
+                        <Zap className="h-3 w-3" />
+                        <span className="text-[10px] font-bold">ON</span>
+                    </div>
+                </>
              )}
             <div className="px-5 py-2 border-l border-slate-800">
                 <p className="text-[9px] uppercase text-slate-500 font-bold tracking-wider">Stop Count</p>
@@ -410,7 +446,7 @@ export function DashboardView() {
       <div className="grid grid-cols-12 gap-6 h-[calc(100vh-220px)]">
         {/* --- COLUNA PRINCIPAL (GRÁFICO) --- */}
         <div className="col-span-12 lg:col-span-9 flex flex-col gap-4 h-full">
-          <Card className="flex-1 flex flex-col bg-slate-900 border-slate-800 shadow-xl overflow-hidden">
+          <Card className="flex-1 flex flex-col bg-slate-900 border-slate-800 shadow-xl overflow-hidden min-h-[400px]">
             <div className="flex flex-row items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50">
               <div className="flex items-center gap-2">
                 <BarChart3 className="h-5 w-5 text-slate-400" />
@@ -444,6 +480,31 @@ export function DashboardView() {
                 )}
             </div>
           </Card>
+
+          {/* --- PAINEL DE ATIVIDADE AO VIVO --- */}
+          {liveTrades.length > 0 && (
+              <div className="h-[150px] bg-slate-900 border border-slate-800 rounded-lg overflow-hidden flex flex-col">
+                  <div className="px-4 py-2 bg-slate-950 border-b border-slate-800 flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-slate-400" />
+                      <span className="text-xs font-bold text-slate-300 uppercase">Live Activity</span>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                      {liveTrades.map((trade, idx) => (
+                          <div key={idx} className="flex items-center justify-between bg-slate-800/50 p-2 rounded text-xs border border-slate-700/50">
+                              <div className="flex items-center gap-3">
+                                  <span className="text-slate-500 font-mono">{trade.time}</span>
+                                  <span className="font-bold text-white">{trade.asset}</span>
+                                  <span className={cn("px-1.5 py-0.5 rounded font-black text-[10px]", trade.type === 'CALL' ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400")}>{trade.type}</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                  <span className="text-slate-300 font-bold">{formatCurrency(trade.amount)}</span>
+                                  <span className="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded border border-yellow-500/20">PENDING</span>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          )}
 
           {/* --- PAINEL DE SINAL (SNIPER) --- */}
           <Card className={cn(
@@ -562,6 +623,14 @@ export function DashboardView() {
                         <div className={cn("border rounded-lg p-3 text-xs mb-2 flex items-center gap-2", botStatus === 'RUNNING' ? "bg-green-500/10 border-green-500/20 text-green-400" : "bg-slate-800/50 border-slate-700 text-slate-400")}>
                             {botStatus === 'RUNNING' ? <Activity className="h-3 w-3 animate-pulse" /> : <Bot className="h-3 w-3" />}
                             <span className="font-bold">Status: {botStatus}</span>
+                        </div>
+
+                         <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase">Valor da Entrada (Stake)</label>
+                            <div className="relative">
+                                <DollarSign className="absolute left-2 top-2 h-3.5 w-3.5 text-slate-500" />
+                                <input type="number" value={autoSettings.stake} onChange={(e) => setAutoSettings({...autoSettings, stake: Number(e.target.value)})} className="w-full h-9 pl-7 bg-slate-950 border border-slate-800 rounded text-white font-bold" />
+                            </div>
                         </div>
 
                         {/* SELETOR DE ESTRATÉGIA DE STOP */}
