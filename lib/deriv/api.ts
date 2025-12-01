@@ -2,12 +2,15 @@
 export class DerivAPI {
     private ws: WebSocket | null = null;
     private token: string | null = null;
-    private appId: string = '1089'; // App ID público genérico para testes ou o seu
+    private appId: string = '1089'; // App ID público genérico
     private tickSubscriptionId: string | null = null;
     private onTickCallback: ((tick: any) => void) | null = null;
+    
+    // Controle de Requisições
+    private reqIdCounter = 0;
+    private pendingRequests = new Map<number, { resolve: (value: any) => void, reject: (reason?: any) => void }>();
   
     constructor() {
-      // Recupera token salvo
       if (typeof window !== 'undefined') {
         this.token = localStorage.getItem('deriv_token');
       }
@@ -25,7 +28,13 @@ export class DerivAPI {
         this.ws.onopen = () => {
           console.log('✅ Conectado à Deriv WebSocket');
           if (this.token) {
-            this.authorize(this.token).then(() => resolve());
+            this.authorize(this.token)
+                .then(() => resolve())
+                .catch(err => {
+                    console.error("Falha na autorização inicial:", err);
+                    // Resolvemos mesmo assim para permitir que o app carregue (modo guest/não autorizado para charts públicos se possível, mas history exige auth geralmente)
+                    resolve(); 
+                });
           } else {
             resolve();
           }
@@ -34,6 +43,20 @@ export class DerivAPI {
         this.ws.onmessage = (msg) => {
           const data = JSON.parse(msg.data);
           
+          // 1. Tratamento de Requisições (Response-Request matching)
+          if (data.req_id && this.pendingRequests.has(data.req_id)) {
+              const { resolve, reject } = this.pendingRequests.get(data.req_id)!;
+              
+              if (data.error) {
+                  console.error("API Error:", data.error);
+                  reject(data.error);
+              } else {
+                  resolve(data);
+              }
+              this.pendingRequests.delete(data.req_id);
+          }
+
+          // 2. Tratamento de Streams (Ticks)
           if (data.msg_type === 'tick' && this.onTickCallback) {
             this.onTickCallback(data.tick);
           }
@@ -52,46 +75,61 @@ export class DerivAPI {
   
     authorize(token: string): Promise<any> {
       return this.send({ authorize: token }).then(res => {
-        if (res.error) throw new Error(res.error.message);
-        console.log('🔓 Autorizado com sucesso:', res.authorize.email);
+        console.log('🔓 Autorizado:', res.authorize?.email);
         return res;
       });
     }
   
     async getHistory(symbol: string, granularity: number = 60, count: number = 100) {
-      // granularity: 60 = 1min, 300 = 5min, 900 = 15min
-      const response = await this.send({
-        ticks_history: symbol,
-        adjust_start_time: 1,
-        count: count,
-        end: 'latest',
-        start: 1,
-        style: 'candles',
-        granularity: granularity
-      });
-  
-      if (response.error) {
-        console.error('Erro ao buscar histórico:', response.error);
-        return [];
+      try {
+          const response = await this.send({
+            ticks_history: symbol,
+            adjust_start_time: 1,
+            count: count,
+            end: 'latest',
+            start: 1,
+            style: 'candles',
+            granularity: granularity
+          });
+      
+          if (response.error) {
+            console.error('Erro ao buscar histórico:', response.error);
+            return [];
+          }
+          
+          const list = response.candles || response.history;
+          if (!list) return [];
+
+          // Se for 'candles' (formato OHLC)
+          if (response.candles) {
+              return response.candles.map((c: any) => ({
+                time: c.epoch * 1000,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close
+              }));
+          }
+          
+          // Tratamento para ativos que retornam 'history' (apenas ticks/preços) se candles falhar
+          return [];
+
+      } catch (e) {
+          console.error("Exception getHistory", e);
+          return [];
       }
-  
-      return response.candles.map((c: any) => ({
-        time: c.epoch * 1000,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close
-      }));
     }
   
     subscribeTicks(symbol: string, callback: (tick: any) => void) {
+      // Cancela anterior se existir
       if (this.tickSubscriptionId) {
-        this.send({ forget: this.tickSubscriptionId });
+        this.send({ forget: this.tickSubscriptionId }).catch(() => {});
+        this.tickSubscriptionId = null;
       }
       
       this.onTickCallback = callback;
       this.send({ ticks: symbol }).then(res => {
-        if (!res.error) {
+        if (!res.error && res.subscription) {
           this.tickSubscriptionId = res.subscription.id;
         }
       });
@@ -119,27 +157,21 @@ export class DerivAPI {
     private send(data: any): Promise<any> {
       return new Promise((resolve, reject) => {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          reject('WebSocket não conectado');
+          // Tentar reconectar ou falhar
+          console.warn("WS não conectado, tentando reconectar...");
+          this.connect().then(() => {
+              this.send(data).then(resolve).catch(reject);
+          }).catch(() => reject('WebSocket Offline'));
           return;
         }
-  
-        // Wrapper simples para pegar a resposta correta (em prod usaria req_id)
-        const listener = (msg: MessageEvent) => {
-          const response = JSON.parse(msg.data);
-          
-          // Verifica se a resposta corresponde ao tipo de pedido (simplificado)
-          const msgType = Object.keys(data)[0]; 
-          if (response.msg_type === msgType || response.msg_type === 'authorize' || response.error) {
-             this.ws?.removeEventListener('message', listener);
-             resolve(response);
-          }
-        };
-  
-        this.ws.addEventListener('message', listener);
-        this.ws.send(JSON.stringify(data));
+
+        const req_id = ++this.reqIdCounter;
+        this.pendingRequests.set(req_id, { resolve, reject });
+        
+        const payload = { ...data, req_id };
+        this.ws.send(JSON.stringify(payload));
       });
     }
-  }
+}
   
-  export const derivApi = new DerivAPI();
-  
+export const derivApi = new DerivAPI();
