@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, Settings2 } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 
@@ -73,6 +73,17 @@ export function DashboardView() {
   const RISK_CONFIG = { maxTrades: 3, stopWin: 50.00, stopLoss: -30.00 };
   const isMarketLocked = dailyStats.trades >= RISK_CONFIG.maxTrades || dailyStats.profit >= RISK_CONFIG.stopWin || dailyStats.profit <= RISK_CONFIG.stopLoss;
 
+  // --- MODO AUTOMÁTICO (BOT) ---
+  const [executionMode, setExecutionMode] = useState<'MANUAL' | 'AUTO'>('MANUAL');
+  const [isAutoRunning, setIsAutoRunning] = useState(false);
+  const [autoSettings, setAutoSettings] = useState({
+      stake: 5.0,
+      maxTrades: 5,
+      stopWin: 20.0,
+      stopLoss: 15.0
+  });
+  const lastAutoTradeTimestamp = useRef<number>(0);
+
   const lastCandleCreationRef = useRef<number>(Date.now());
 
   // Simulação de Mercado
@@ -143,10 +154,37 @@ export function DashboardView() {
     return () => clearInterval(interval);
   }, [timeframe, activeAsset]);
 
-  const handleTrade = (type: 'CALL' | 'PUT') => {
+  // --- LÓGICA DO BOT AUTOMÁTICO ---
+  useEffect(() => {
+      if (!isAutoRunning || executionMode !== 'AUTO' || !analysis || !analysis.isSniperReady) return;
+
+      // 1. Evitar entrar no mesmo sinal repetidamente (Debounce por Timestamp da Análise)
+      if (analysis.timestamp <= lastAutoTradeTimestamp.current) return;
+
+      // 2. Verificar Travas de Segurança (Risco Global + Config do Bot)
+      if (isMarketLocked) {
+          setIsAutoRunning(false);
+          return;
+      }
+      
+      // Limites específicos do Auto Mode
+      if (dailyStats.trades >= autoSettings.maxTrades) { setIsAutoRunning(false); return; }
+      if (dailyStats.profit >= autoSettings.stopWin) { setIsAutoRunning(false); return; }
+      if (dailyStats.profit <= -Math.abs(autoSettings.stopLoss)) { setIsAutoRunning(false); return; }
+
+      // 3. Executar Trade
+      if (analysis.direction === 'CALL' || analysis.direction === 'PUT') {
+          handleTrade(analysis.direction, autoSettings.stake);
+          lastAutoTradeTimestamp.current = analysis.timestamp;
+      }
+
+  }, [analysis, isAutoRunning, executionMode, dailyStats, autoSettings, isMarketLocked]);
+
+
+  const handleTrade = (type: 'CALL' | 'PUT', tradeStake = stake) => {
       if (isMarketLocked) return;
-      const isWin = Math.random() > 0.4; 
-      const profit = isWin ? stake * 0.95 : -stake;
+      const isWin = Math.random() > 0.4; // 60% chance simulated
+      const profit = isWin ? tradeStake * 0.95 : -tradeStake;
       const newStats = {
           trades: dailyStats.trades + 1,
           wins: isWin ? dailyStats.wins + 1 : dailyStats.wins,
@@ -408,7 +446,7 @@ export function DashboardView() {
           </Card>
         </div>
 
-        {/* --- COLUNA LATERAL (EXECUÇÃO) --- */}
+        {/* --- COLUNA LATERAL (EXECUÇÃO COM ABAS) --- */}
         <div className="col-span-12 lg:col-span-3 h-full">
           <Card className="h-full flex flex-col bg-slate-900 shadow-xl border-slate-800 relative overflow-hidden">
              {isMarketLocked && <div className="absolute inset-0 bg-slate-950/90 z-20 flex flex-col items-center justify-center text-white text-center p-4 backdrop-blur-sm">
@@ -417,62 +455,161 @@ export function DashboardView() {
                  <p className="text-sm text-slate-400">Volte amanhã Sniper.</p>
              </div>}
 
-             <div className="p-4 bg-slate-950 text-white text-center border-b border-slate-800">
-                 <h3 className="font-bold text-sm uppercase tracking-wider flex items-center justify-center gap-2 text-slate-300">
-                     <Layers className="h-4 w-4 text-green-500" /> Ordem Rápida
-                 </h3>
+             {/* TABS HEADER */}
+             <div className="grid grid-cols-2 border-b border-slate-800">
+                <button 
+                    onClick={() => setExecutionMode('MANUAL')}
+                    className={cn(
+                        "p-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors",
+                        executionMode === 'MANUAL' ? "bg-slate-800 text-white border-b-2 border-green-500" : "bg-slate-950 text-slate-500 hover:text-slate-300"
+                    )}
+                >
+                    <Layers className="h-3.5 w-3.5" /> Manual
+                </button>
+                <button 
+                    onClick={() => setExecutionMode('AUTO')}
+                    className={cn(
+                        "p-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors",
+                        executionMode === 'AUTO' ? "bg-slate-800 text-white border-b-2 border-yellow-500" : "bg-slate-950 text-slate-500 hover:text-slate-300"
+                    )}
+                >
+                    <Bot className="h-3.5 w-3.5" /> Auto Bot
+                </button>
              </div>
 
-             <CardContent className="flex-1 flex flex-col p-6 gap-6">
-                <div className="space-y-4">
-                    <label className="text-xs font-bold text-slate-500 uppercase">Valor da Entrada</label>
-                    <div className="relative group">
-                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 group-focus-within:text-green-500 transition-colors" />
-                        <input 
-                            type="number" 
-                            value={stake} 
-                            onChange={(e) => setStake(Number(e.target.value))} 
-                            className="w-full h-14 pl-10 pr-4 bg-slate-950 border border-slate-800 rounded-xl text-2xl font-black text-slate-200 focus:outline-none focus:ring-2 focus:ring-green-500/50 transition-all placeholder-slate-700"
-                        />
+             <CardContent className="flex-1 flex flex-col p-6 gap-6 overflow-y-auto">
+                
+                {/* --- MODO MANUAL --- */}
+                {executionMode === 'MANUAL' && (
+                    <div className="space-y-6 flex-1 flex flex-col">
+                        <div className="space-y-4">
+                            <label className="text-xs font-bold text-slate-500 uppercase">Valor da Entrada</label>
+                            <div className="relative group">
+                                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 group-focus-within:text-green-500 transition-colors" />
+                                <input 
+                                    type="number" 
+                                    value={stake} 
+                                    onChange={(e) => setStake(Number(e.target.value))} 
+                                    className="w-full h-14 pl-10 pr-4 bg-slate-950 border border-slate-800 rounded-xl text-2xl font-black text-slate-200 focus:outline-none focus:ring-2 focus:ring-green-500/50 transition-all placeholder-slate-700"
+                                />
+                            </div>
+                            <div className="flex justify-between text-xs font-medium text-slate-500 px-1">
+                                <span>Min: $0.35</span>
+                                <span>Payout: <span className="text-green-500 font-bold">95%</span></span>
+                            </div>
+                        </div>
+
+                        <div className="bg-green-500/5 border border-green-500/20 p-4 rounded-xl text-center space-y-1">
+                            <span className="text-xs font-bold text-green-600/80 uppercase">Lucro Previsto</span>
+                            <div className="text-3xl font-black text-green-500 tracking-tight drop-shadow-[0_0_10px_rgba(34,197,94,0.2)]">+{formatCurrency(stake * 0.95)}</div>
+                        </div>
+
+                        <div className="flex-1 grid grid-rows-2 gap-3 mt-4">
+                            <Button 
+                                className={cn(
+                                    "h-full text-xl font-black flex flex-col items-center justify-center gap-1 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-[0.98]",
+                                    analysis?.direction === 'CALL' 
+                                        ? "bg-green-600 hover:bg-green-500 text-white shadow-[0_0_20px_rgba(22,163,74,0.3)] border border-green-400/50" 
+                                        : "bg-slate-800 text-slate-500 hover:bg-slate-700 border border-slate-700"
+                                )}
+                                onClick={() => handleTrade('CALL')}
+                                disabled={isMarketLocked}
+                            >
+                                <span className="flex items-center gap-2">CALL <TrendingUp className="h-5 w-5" /></span>
+                            </Button>
+
+                            <Button 
+                                className={cn(
+                                    "h-full text-xl font-black flex flex-col items-center justify-center gap-1 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-[0.98]",
+                                    analysis?.direction === 'PUT' 
+                                        ? "bg-red-600 hover:bg-red-500 text-white shadow-[0_0_20px_rgba(220,38,38,0.3)] border border-red-400/50" 
+                                        : "bg-slate-800 text-slate-500 hover:bg-slate-700 border border-slate-700"
+                                )}
+                                onClick={() => handleTrade('PUT')}
+                                disabled={isMarketLocked}
+                            >
+                                <span className="flex items-center gap-2">PUT <TrendingDown className="h-5 w-5" /></span>
+                            </Button>
+                        </div>
                     </div>
-                    <div className="flex justify-between text-xs font-medium text-slate-500 px-1">
-                        <span>Min: $0.35</span>
-                        <span>Payout: <span className="text-green-500 font-bold">95%</span></span>
+                )}
+
+                {/* --- MODO AUTOMÁTICO --- */}
+                {executionMode === 'AUTO' && (
+                    <div className="space-y-6 flex-1 flex flex-col">
+                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 text-xs text-yellow-500 mb-2">
+                            <p className="font-bold flex items-center gap-2"><ShieldAlert className="h-3 w-3" /> Aviso de Risco</p>
+                            <p className="opacity-80 mt-1">O bot opera apenas sinais de <strong>Sniper (Alta Probabilidade)</strong>. Configure seus limites com cautela.</p>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Stake Automática</label>
+                                <div className="relative">
+                                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                                    <input 
+                                        type="number" 
+                                        value={autoSettings.stake}
+                                        disabled={isAutoRunning}
+                                        onChange={(e) => setAutoSettings({...autoSettings, stake: Number(e.target.value)})} 
+                                        className="w-full h-10 pl-9 pr-3 bg-slate-950 border border-slate-800 rounded-lg font-bold text-white focus:ring-yellow-500/50 focus:border-yellow-500/50 disabled:opacity-50"
+                                    />
+                                </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Max Trades</label>
+                                    <input 
+                                        type="number" 
+                                        value={autoSettings.maxTrades}
+                                        disabled={isAutoRunning}
+                                        onChange={(e) => setAutoSettings({...autoSettings, maxTrades: Number(e.target.value)})} 
+                                        className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg font-bold text-white focus:ring-yellow-500/50 disabled:opacity-50"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Stop Win</label>
+                                    <input 
+                                        type="number" 
+                                        value={autoSettings.stopWin}
+                                        disabled={isAutoRunning}
+                                        onChange={(e) => setAutoSettings({...autoSettings, stopWin: Number(e.target.value)})} 
+                                        className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-lg font-bold text-green-400 focus:ring-yellow-500/50 disabled:opacity-50"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 flex flex-col justify-end gap-3 mt-4">
+                            <Button 
+                                className={cn(
+                                    "h-16 text-lg font-black flex items-center justify-center gap-2 rounded-xl shadow-lg transition-all",
+                                    isAutoRunning 
+                                        ? "bg-red-600 hover:bg-red-700 text-white animate-pulse" 
+                                        : "bg-yellow-500 hover:bg-yellow-600 text-slate-900"
+                                )}
+                                onClick={() => setIsAutoRunning(!isAutoRunning)}
+                                disabled={isMarketLocked && !isAutoRunning}
+                            >
+                                {isAutoRunning ? (
+                                    <>PAUSAR BOT <Pause className="h-5 w-5 fill-current" /></>
+                                ) : (
+                                    <>INICIAR BOT <Play className="h-5 w-5 fill-current" /></>
+                                )}
+                            </Button>
+                            
+                            {isAutoRunning && (
+                                <div className="text-center">
+                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-yellow-500/10 text-yellow-500 text-xs font-bold border border-yellow-500/20 animate-pulse">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                                        Aguardando Sinal Sniper...
+                                    </span>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                </div>
-
-                <div className="bg-green-500/5 border border-green-500/20 p-4 rounded-xl text-center space-y-1">
-                    <span className="text-xs font-bold text-green-600/80 uppercase">Lucro Previsto</span>
-                    <div className="text-3xl font-black text-green-500 tracking-tight drop-shadow-[0_0_10px_rgba(34,197,94,0.2)]">+{formatCurrency(stake * 0.95)}</div>
-                </div>
-
-                <div className="flex-1 grid grid-rows-2 gap-3 mt-4">
-                    <Button 
-                        className={cn(
-                            "h-full text-xl font-black flex flex-col items-center justify-center gap-1 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-[0.98]",
-                            analysis?.direction === 'CALL' 
-                                ? "bg-green-600 hover:bg-green-500 text-white shadow-[0_0_20px_rgba(22,163,74,0.3)] border border-green-400/50" 
-                                : "bg-slate-800 text-slate-500 hover:bg-slate-700 border border-slate-700"
-                        )}
-                        onClick={() => handleTrade('CALL')}
-                        disabled={isMarketLocked}
-                    >
-                        <span className="flex items-center gap-2">CALL <TrendingUp className="h-5 w-5" /></span>
-                    </Button>
-
-                    <Button 
-                        className={cn(
-                            "h-full text-xl font-black flex flex-col items-center justify-center gap-1 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-[0.98]",
-                            analysis?.direction === 'PUT' 
-                                ? "bg-red-600 hover:bg-red-500 text-white shadow-[0_0_20px_rgba(220,38,38,0.3)] border border-red-400/50" 
-                                : "bg-slate-800 text-slate-500 hover:bg-slate-700 border border-slate-700"
-                        )}
-                        onClick={() => handleTrade('PUT')}
-                        disabled={isMarketLocked}
-                    >
-                        <span className="flex items-center gap-2">PUT <TrendingDown className="h-5 w-5" /></span>
-                    </Button>
-                </div>
+                )}
              </CardContent>
           </Card>
         </div>
