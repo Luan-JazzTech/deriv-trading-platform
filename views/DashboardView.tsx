@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet, Timer as TimerIcon, StopCircle } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet, Timer as TimerIcon, StopCircle, Settings2, Sliders } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 import { derivApi } from '../lib/deriv/api';
@@ -76,7 +76,8 @@ export function DashboardView() {
   // --- CONFIGURAÇÃO BOT ---
   const [isAutoRunning, setIsAutoRunning] = useState(false);
   const [botStatus, setBotStatus] = useState<'IDLE' | 'RUNNING' | 'WAITING_SCHEDULE' | 'STOPPED_BY_RISK'>('IDLE');
-  
+  const [botTab, setBotTab] = useState<'CONFIG' | 'RISK'>('CONFIG'); // UI Tab
+
   const [stopMode, setStopMode] = useState<'FINANCIAL' | 'QUANTITY'>('FINANCIAL');
   
   const [autoSettings, setAutoSettings] = useState({
@@ -280,6 +281,10 @@ export function DashboardView() {
 
           const contractInfo = response.buy;
           
+          // --- ATUALIZAÇÃO OTIMISTA DO SALDO ---
+          // Subtrai o valor imediatamente para dar feedback instantâneo ao usuário
+          setAccountInfo(prev => prev ? { ...prev, balance: prev.balance - tradeStake } : null);
+
           // Adiciona ao log visual como PENDING
           const newTrade: TradeActivity = {
               id: contractInfo.contract_id,
@@ -313,7 +318,7 @@ export function DashboardView() {
                       profit: prev.profit + profit
                   }));
 
-                  // Salva no Banco de Dados
+                  // Salva no Banco de Dados Supabase
                   supabase.from('trades_log').insert({
                       symbol: activeAsset.name,
                       direction: type,
@@ -322,7 +327,9 @@ export function DashboardView() {
                       result: status,
                       profit: profit,
                       deriv_contract_id: contractInfo.contract_id
-                  }).then(() => {});
+                  }).then((res) => {
+                      if(res.error) console.error("Erro ao salvar log:", res.error);
+                  });
               }
           });
 
@@ -562,92 +569,133 @@ export function DashboardView() {
                     </div>
                 )}
 
-                {/* --- MODO AUTO (BOT) - RESTAURADO --- */}
+                {/* --- MODO AUTO (BOT UI REDESIGNED) --- */}
                 {executionMode === 'AUTO' && (
-                    <div className="space-y-6 flex flex-col h-full">
-                       <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 flex items-center gap-3">
-                           <Bot className={cn("h-8 w-8", isAutoRunning ? "text-green-500 animate-pulse" : "text-yellow-500")} />
+                    <div className="space-y-4 flex flex-col h-full">
+                       {/* BOT STATUS HEADER */}
+                       <div className={cn(
+                           "p-4 rounded-xl border flex items-center gap-3 shadow-lg",
+                           isAutoRunning ? "bg-green-950/20 border-green-500/30" : "bg-slate-950 border-slate-800"
+                       )}>
+                           <div className={cn("p-2 rounded-full", isAutoRunning ? "bg-green-500/20 animate-pulse" : "bg-slate-800")}>
+                               <Bot className={cn("h-6 w-6", isAutoRunning ? "text-green-500" : "text-slate-500")} />
+                           </div>
                            <div className="flex-1">
-                               <h4 className="font-bold text-white text-sm">Bot Sniper</h4>
-                               <p className="text-[10px] text-slate-400">
-                                   Status: <span className={cn("font-bold uppercase", botStatus === 'RUNNING' ? 'text-green-400' : 'text-slate-500')}>{botStatus === 'RUNNING' ? 'Operando' : 'Parado'}</span>
+                               <h4 className="font-bold text-white text-sm">Sniper Bot v1.0</h4>
+                               <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                                   Status: <span className={cn("font-bold uppercase", isAutoRunning ? 'text-green-400' : 'text-slate-500')}>{botStatus.replace('_', ' ')}</span>
                                </p>
                            </div>
                        </div>
                        
-                       <div className="space-y-4 overflow-y-auto flex-1 pr-2">
-                           <div className="space-y-2">
-                               <label className="text-[10px] font-bold text-slate-500 uppercase">Valor da Entrada (Bot)</label>
-                               <div className="relative">
-                                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-                                  <input type="number" value={autoSettings.stake} onChange={(e) => setAutoSettings({...autoSettings, stake: Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded h-10 pl-9 text-white font-bold text-sm" />
-                               </div>
-                           </div>
+                       {/* SETTINGS TABS */}
+                       <div className="flex gap-2 p-1 bg-slate-950 rounded-lg border border-slate-800">
+                           <button 
+                             onClick={() => setBotTab('CONFIG')}
+                             className={cn("flex-1 py-2 text-[10px] font-bold rounded transition-colors flex items-center justify-center gap-2", botTab === 'CONFIG' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
+                           >
+                               <Settings2 className="h-3 w-3" /> ESTRATÉGIA
+                           </button>
+                           <button 
+                             onClick={() => setBotTab('RISK')}
+                             className={cn("flex-1 py-2 text-[10px] font-bold rounded transition-colors flex items-center justify-center gap-2", botTab === 'RISK' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
+                           >
+                               <ShieldAlert className="h-3 w-3" /> RISCO / AGENDAMENTO
+                           </button>
+                       </div>
 
-                           <div className="space-y-2 pt-2 border-t border-slate-800">
-                               <div className="flex items-center justify-between">
-                                  <label className="text-[10px] font-bold text-slate-500 uppercase">Estratégia de Parada</label>
-                                  <button onClick={() => setStopMode(prev => prev === 'FINANCIAL' ? 'QUANTITY' : 'FINANCIAL')} className="text-[10px] text-blue-400 hover:underline">
-                                      Alternar para {stopMode === 'FINANCIAL' ? 'Quantidade' : 'Financeiro'}
-                                  </button>
+                       <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                           {botTab === 'CONFIG' && (
+                               <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                                   <div className="space-y-2">
+                                       <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1"><DollarSign className="h-3 w-3" /> Stake (Valor da Entrada)</label>
+                                       <input type="number" value={autoSettings.stake} onChange={(e) => setAutoSettings({...autoSettings, stake: Number(e.target.value)})} className="w-full h-12 bg-slate-950 border border-slate-700 rounded-lg pl-4 text-white font-black text-lg focus:ring-2 focus:ring-yellow-500/50 outline-none" placeholder="10.00" />
+                                   </div>
+                                   
+                                   <div className="p-3 bg-slate-950 rounded-lg border border-slate-800">
+                                       <h5 className="text-[10px] font-bold text-slate-500 uppercase mb-2">Resumo da Sessão</h5>
+                                       <div className="grid grid-cols-2 gap-2 text-center">
+                                           <div className="bg-green-500/10 rounded p-2 border border-green-500/20">
+                                               <span className="block text-xl font-bold text-green-500">{dailyStats.wins}</span>
+                                               <span className="text-[9px] text-green-400 uppercase font-bold">Wins</span>
+                                           </div>
+                                           <div className="bg-red-500/10 rounded p-2 border border-red-500/20">
+                                               <span className="block text-xl font-bold text-red-500">{dailyStats.losses}</span>
+                                               <span className="text-[9px] text-red-400 uppercase font-bold">Losses</span>
+                                           </div>
+                                       </div>
+                                   </div>
                                </div>
-                               
-                               {stopMode === 'FINANCIAL' ? (
-                                   <div className="grid grid-cols-2 gap-2">
-                                       <div>
-                                           <label className="text-[9px] text-slate-500">Stop Win ($)</label>
-                                           <input type="number" value={autoSettings.stopWinValue} onChange={(e) => setAutoSettings({...autoSettings, stopWinValue: Number(e.target.value)})} className="w-full bg-slate-950 border border-green-900/50 rounded h-8 px-2 text-green-400 font-mono text-xs" />
+                           )}
+
+                           {botTab === 'RISK' && (
+                               <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                                   <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-3">
+                                       <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase">Stop Strategy</span>
+                                            <button onClick={() => setStopMode(prev => prev === 'FINANCIAL' ? 'QUANTITY' : 'FINANCIAL')} className="text-[9px] text-blue-400 font-bold bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">
+                                                {stopMode === 'FINANCIAL' ? '$ FINANCEIRO' : '# QUANTIDADE'}
+                                            </button>
                                        </div>
-                                       <div>
-                                           <label className="text-[9px] text-slate-500">Stop Loss ($)</label>
-                                           <input type="number" value={autoSettings.stopLossValue} onChange={(e) => setAutoSettings({...autoSettings, stopLossValue: Number(e.target.value)})} className="w-full bg-slate-950 border border-red-900/50 rounded h-8 px-2 text-red-400 font-mono text-xs" />
-                                       </div>
+                                       
+                                       {stopMode === 'FINANCIAL' ? (
+                                           <div className="grid grid-cols-2 gap-3">
+                                               <div>
+                                                   <label className="text-[9px] text-slate-500 uppercase font-bold">Stop Win ($)</label>
+                                                   <input type="number" value={autoSettings.stopWinValue} onChange={(e) => setAutoSettings({...autoSettings, stopWinValue: Number(e.target.value)})} className="w-full bg-slate-900 border border-green-800/50 rounded h-9 px-2 text-green-400 font-mono text-sm font-bold mt-1" />
+                                               </div>
+                                               <div>
+                                                   <label className="text-[9px] text-slate-500 uppercase font-bold">Stop Loss ($)</label>
+                                                   <input type="number" value={autoSettings.stopLossValue} onChange={(e) => setAutoSettings({...autoSettings, stopLossValue: Number(e.target.value)})} className="w-full bg-slate-900 border border-red-800/50 rounded h-9 px-2 text-red-400 font-mono text-sm font-bold mt-1" />
+                                               </div>
+                                           </div>
+                                       ) : (
+                                           <div className="grid grid-cols-2 gap-3">
+                                               <div>
+                                                   <label className="text-[9px] text-slate-500 uppercase font-bold">Meta Wins</label>
+                                                   <input type="number" value={autoSettings.stopWinCount} onChange={(e) => setAutoSettings({...autoSettings, stopWinCount: Number(e.target.value)})} className="w-full bg-slate-900 border border-green-800/50 rounded h-9 px-2 text-green-400 font-mono text-sm font-bold mt-1" />
+                                               </div>
+                                               <div>
+                                                   <label className="text-[9px] text-slate-500 uppercase font-bold">Max Loss</label>
+                                                   <input type="number" value={autoSettings.stopLossCount} onChange={(e) => setAutoSettings({...autoSettings, stopLossCount: Number(e.target.value)})} className="w-full bg-slate-900 border border-red-800/50 rounded h-9 px-2 text-red-400 font-mono text-sm font-bold mt-1" />
+                                               </div>
+                                           </div>
+                                       )}
                                    </div>
-                               ) : (
-                                   <div className="grid grid-cols-2 gap-2">
-                                       <div>
-                                           <label className="text-[9px] text-slate-500">Meta Wins (Qtd)</label>
-                                           <input type="number" value={autoSettings.stopWinCount} onChange={(e) => setAutoSettings({...autoSettings, stopWinCount: Number(e.target.value)})} className="w-full bg-slate-950 border border-green-900/50 rounded h-8 px-2 text-green-400 font-mono text-xs" />
+                                   
+                                   <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-3">
+                                       <div className="flex items-center gap-2">
+                                          <input type="checkbox" checked={autoSettings.scheduleEnabled} onChange={(e) => setAutoSettings({...autoSettings, scheduleEnabled: e.target.checked})} className="rounded border-slate-700 bg-slate-900 text-green-500" />
+                                          <label className="text-[10px] font-bold text-slate-400 uppercase">Agendar Horário</label>
                                        </div>
-                                       <div>
-                                           <label className="text-[9px] text-slate-500">Max Loss (Qtd)</label>
-                                           <input type="number" value={autoSettings.stopLossCount} onChange={(e) => setAutoSettings({...autoSettings, stopLossCount: Number(e.target.value)})} className="w-full bg-slate-950 border border-red-900/50 rounded h-8 px-2 text-red-400 font-mono text-xs" />
-                                       </div>
+                                       {autoSettings.scheduleEnabled && (
+                                           <div className="grid grid-cols-2 gap-2 mt-2">
+                                               <input type="time" value={autoSettings.startTime} onChange={(e) => setAutoSettings({...autoSettings, startTime: e.target.value})} className="bg-slate-900 border border-slate-800 rounded text-xs text-white px-2 py-1" />
+                                               <input type="time" value={autoSettings.endTime} onChange={(e) => setAutoSettings({...autoSettings, endTime: e.target.value})} className="bg-slate-900 border border-slate-800 rounded text-xs text-white px-2 py-1" />
+                                               <div className="col-span-2 flex justify-between gap-1 mt-1">
+                                                  {[1,2,3,4,5].map(day => (
+                                                      <button key={day} onClick={() => {
+                                                          const days = autoSettings.activeDays.includes(day) 
+                                                            ? autoSettings.activeDays.filter(d => d !== day)
+                                                            : [...autoSettings.activeDays, day];
+                                                          setAutoSettings({...autoSettings, activeDays: days});
+                                                      }} className={cn("w-6 h-6 text-[9px] rounded font-bold transition-all", autoSettings.activeDays.includes(day) ? "bg-green-600 text-white shadow-lg shadow-green-500/20" : "bg-slate-800 text-slate-500")}>
+                                                          {['D','S','T','Q','Q','S','S'][day]}
+                                                      </button>
+                                                  ))}
+                                               </div>
+                                           </div>
+                                       )}
                                    </div>
-                               )}
-                           </div>
-                           
-                           <div className="space-y-2 pt-2 border-t border-slate-800">
-                               <div className="flex items-center gap-2">
-                                  <input type="checkbox" checked={autoSettings.scheduleEnabled} onChange={(e) => setAutoSettings({...autoSettings, scheduleEnabled: e.target.checked})} className="rounded border-slate-700 bg-slate-900 text-green-500" />
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase">Agendar Horário</label>
                                </div>
-                               {autoSettings.scheduleEnabled && (
-                                   <div className="grid grid-cols-2 gap-2 mt-2">
-                                       <input type="time" value={autoSettings.startTime} onChange={(e) => setAutoSettings({...autoSettings, startTime: e.target.value})} className="bg-slate-950 border border-slate-800 rounded text-xs text-white px-2 py-1" />
-                                       <input type="time" value={autoSettings.endTime} onChange={(e) => setAutoSettings({...autoSettings, endTime: e.target.value})} className="bg-slate-950 border border-slate-800 rounded text-xs text-white px-2 py-1" />
-                                       <div className="col-span-2 flex justify-between gap-1">
-                                          {[1,2,3,4,5].map(day => (
-                                              <button key={day} onClick={() => {
-                                                  const days = autoSettings.activeDays.includes(day) 
-                                                    ? autoSettings.activeDays.filter(d => d !== day)
-                                                    : [...autoSettings.activeDays, day];
-                                                  setAutoSettings({...autoSettings, activeDays: days});
-                                              }} className={cn("w-6 h-6 text-[9px] rounded font-bold", autoSettings.activeDays.includes(day) ? "bg-green-600 text-white" : "bg-slate-800 text-slate-500")}>
-                                                  {['D','S','T','Q','Q','S','S'][day]}
-                                              </button>
-                                          ))}
-                                       </div>
-                                   </div>
-                               )}
-                           </div>
+                           )}
                        </div>
 
                        <Button 
                          onClick={() => setIsAutoRunning(!isAutoRunning)}
-                         className={cn("w-full font-bold h-12 text-sm", isAutoRunning ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700")}
+                         className={cn("w-full font-black h-12 text-sm shadow-xl transition-all", isAutoRunning ? "bg-red-600 hover:bg-red-700 shadow-red-500/20" : "bg-green-600 hover:bg-green-700 shadow-green-500/20")}
                        >
-                           {isAutoRunning ? <><StopCircle className="mr-2 h-4 w-4" /> PARAR BOT</> : <><Play className="mr-2 h-4 w-4" /> INICIAR BOT</>}
+                           {isAutoRunning ? <><StopCircle className="mr-2 h-5 w-5" /> PARAR BOT</> : <><Play className="mr-2 h-5 w-5" /> INICIAR AUTO</>}
                        </Button>
                     </div>
                 )}
