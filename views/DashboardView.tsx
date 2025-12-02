@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet, Timer as TimerIcon } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet, Timer as TimerIcon, StopCircle } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 import { derivApi } from '../lib/deriv/api';
@@ -88,7 +88,7 @@ export function DashboardView() {
       scheduleEnabled: false,
       startTime: '09:00',
       endTime: '17:00',
-      activeDays: [1, 2, 3, 4, 5]
+      activeDays: [1, 2, 3, 4, 5] // 1=Seg, 5=Sex
   });
 
   const [marketRanking, setMarketRanking] = useState<AssetRanking[]>([]);
@@ -211,22 +211,41 @@ export function DashboardView() {
           setBotStatus('IDLE');
           return;
       }
+      // Verificar agendamento
       if (autoSettings.scheduleEnabled) {
           const now = new Date();
           const currentDay = now.getDay();
-          if (!autoSettings.activeDays.includes(currentDay)) { setBotStatus('WAITING_SCHEDULE'); return; }
+          // Verifica dia da semana
+          if (!autoSettings.activeDays.includes(currentDay)) { 
+              setBotStatus('WAITING_SCHEDULE'); 
+              return; 
+          }
+          // Verifica hora
           const [startHour, startMin] = autoSettings.startTime.split(':').map(Number);
           const [endHour, endMin] = autoSettings.endTime.split(':').map(Number);
-          const start = new Date(now).setHours(startHour, startMin, 0, 0);
-          const end = new Date(now).setHours(endHour, endMin, 0, 0);
+          
+          const start = new Date(now); start.setHours(startHour, startMin, 0, 0);
+          const end = new Date(now); end.setHours(endHour, endMin, 0, 0);
           const current = now.getTime();
-          if (current < start || current > end) { setBotStatus('WAITING_SCHEDULE'); return; }
+          
+          if (current < start.getTime() || current > end.getTime()) { 
+              setBotStatus('WAITING_SCHEDULE'); 
+              return; 
+          }
       }
-      if (isAutoLocked()) { setBotStatus('STOPPED_BY_RISK'); return; }
+      
+      // Verificar travas de risco
+      if (isAutoLocked()) { 
+          setBotStatus('STOPPED_BY_RISK'); 
+          setIsAutoRunning(false); // Para o bot automaticamente
+          return; 
+      }
+      
       setBotStatus('RUNNING');
+      
+      // Execução
       if (analysis && analysis.isSniperReady) {
           if (analysis.timestamp <= lastAutoTradeTimestamp.current) return;
-          // Rate Limit Check no Bot também
           if (cooldown > 0) return;
 
           if (analysis.direction === 'CALL' || analysis.direction === 'PUT') {
@@ -238,7 +257,10 @@ export function DashboardView() {
 
 
   const handleTrade = async (type: 'CALL' | 'PUT', tradeStake = stake) => {
-      if (executionMode === 'MANUAL' && isManualLocked) return;
+      if (executionMode === 'MANUAL' && isManualLocked) {
+          alert("Limite de trades manuais atingido!");
+          return;
+      }
       if (!isConnected) { alert('Conecte a API nas configurações!'); return; }
       if (cooldown > 0) return;
 
@@ -291,7 +313,7 @@ export function DashboardView() {
                       profit: prev.profit + profit
                   }));
 
-                  // Salva no Banco de Dados (Log Definitivo)
+                  // Salva no Banco de Dados
                   supabase.from('trades_log').insert({
                       symbol: activeAsset.name,
                       direction: type,
@@ -300,7 +322,7 @@ export function DashboardView() {
                       result: status,
                       profit: profit,
                       deriv_contract_id: contractInfo.contract_id
-                  }).then(() => console.log('Trade salvo no banco'));
+                  }).then(() => {});
               }
           });
 
@@ -519,6 +541,7 @@ export function DashboardView() {
              </div>
 
              <CardContent className="flex-1 flex flex-col p-6 gap-6 overflow-y-auto">
+                {/* --- MODO MANUAL --- */}
                 {executionMode === 'MANUAL' && (
                     <div className="space-y-6 flex-1 flex flex-col">
                         <div className="space-y-4">
@@ -538,8 +561,106 @@ export function DashboardView() {
                         </div>
                     </div>
                 )}
-                {/* Outros modos (AUTO/SCANNER) mantidos simplificados para foco na correção do Manual */}
-                {executionMode !== 'MANUAL' && <div className="text-center text-slate-500 py-10">Configure no modo Manual primeiro para testar.</div>}
+
+                {/* --- MODO AUTO (BOT) - RESTAURADO --- */}
+                {executionMode === 'AUTO' && (
+                    <div className="space-y-6 flex flex-col h-full">
+                       <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 flex items-center gap-3">
+                           <Bot className={cn("h-8 w-8", isAutoRunning ? "text-green-500 animate-pulse" : "text-yellow-500")} />
+                           <div className="flex-1">
+                               <h4 className="font-bold text-white text-sm">Bot Sniper</h4>
+                               <p className="text-[10px] text-slate-400">
+                                   Status: <span className={cn("font-bold uppercase", botStatus === 'RUNNING' ? 'text-green-400' : 'text-slate-500')}>{botStatus === 'RUNNING' ? 'Operando' : 'Parado'}</span>
+                               </p>
+                           </div>
+                       </div>
+                       
+                       <div className="space-y-4 overflow-y-auto flex-1 pr-2">
+                           <div className="space-y-2">
+                               <label className="text-[10px] font-bold text-slate-500 uppercase">Valor da Entrada (Bot)</label>
+                               <div className="relative">
+                                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                                  <input type="number" value={autoSettings.stake} onChange={(e) => setAutoSettings({...autoSettings, stake: Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded h-10 pl-9 text-white font-bold text-sm" />
+                               </div>
+                           </div>
+
+                           <div className="space-y-2 pt-2 border-t border-slate-800">
+                               <div className="flex items-center justify-between">
+                                  <label className="text-[10px] font-bold text-slate-500 uppercase">Estratégia de Parada</label>
+                                  <button onClick={() => setStopMode(prev => prev === 'FINANCIAL' ? 'QUANTITY' : 'FINANCIAL')} className="text-[10px] text-blue-400 hover:underline">
+                                      Alternar para {stopMode === 'FINANCIAL' ? 'Quantidade' : 'Financeiro'}
+                                  </button>
+                               </div>
+                               
+                               {stopMode === 'FINANCIAL' ? (
+                                   <div className="grid grid-cols-2 gap-2">
+                                       <div>
+                                           <label className="text-[9px] text-slate-500">Stop Win ($)</label>
+                                           <input type="number" value={autoSettings.stopWinValue} onChange={(e) => setAutoSettings({...autoSettings, stopWinValue: Number(e.target.value)})} className="w-full bg-slate-950 border border-green-900/50 rounded h-8 px-2 text-green-400 font-mono text-xs" />
+                                       </div>
+                                       <div>
+                                           <label className="text-[9px] text-slate-500">Stop Loss ($)</label>
+                                           <input type="number" value={autoSettings.stopLossValue} onChange={(e) => setAutoSettings({...autoSettings, stopLossValue: Number(e.target.value)})} className="w-full bg-slate-950 border border-red-900/50 rounded h-8 px-2 text-red-400 font-mono text-xs" />
+                                       </div>
+                                   </div>
+                               ) : (
+                                   <div className="grid grid-cols-2 gap-2">
+                                       <div>
+                                           <label className="text-[9px] text-slate-500">Meta Wins (Qtd)</label>
+                                           <input type="number" value={autoSettings.stopWinCount} onChange={(e) => setAutoSettings({...autoSettings, stopWinCount: Number(e.target.value)})} className="w-full bg-slate-950 border border-green-900/50 rounded h-8 px-2 text-green-400 font-mono text-xs" />
+                                       </div>
+                                       <div>
+                                           <label className="text-[9px] text-slate-500">Max Loss (Qtd)</label>
+                                           <input type="number" value={autoSettings.stopLossCount} onChange={(e) => setAutoSettings({...autoSettings, stopLossCount: Number(e.target.value)})} className="w-full bg-slate-950 border border-red-900/50 rounded h-8 px-2 text-red-400 font-mono text-xs" />
+                                       </div>
+                                   </div>
+                               )}
+                           </div>
+                           
+                           <div className="space-y-2 pt-2 border-t border-slate-800">
+                               <div className="flex items-center gap-2">
+                                  <input type="checkbox" checked={autoSettings.scheduleEnabled} onChange={(e) => setAutoSettings({...autoSettings, scheduleEnabled: e.target.checked})} className="rounded border-slate-700 bg-slate-900 text-green-500" />
+                                  <label className="text-[10px] font-bold text-slate-400 uppercase">Agendar Horário</label>
+                               </div>
+                               {autoSettings.scheduleEnabled && (
+                                   <div className="grid grid-cols-2 gap-2 mt-2">
+                                       <input type="time" value={autoSettings.startTime} onChange={(e) => setAutoSettings({...autoSettings, startTime: e.target.value})} className="bg-slate-950 border border-slate-800 rounded text-xs text-white px-2 py-1" />
+                                       <input type="time" value={autoSettings.endTime} onChange={(e) => setAutoSettings({...autoSettings, endTime: e.target.value})} className="bg-slate-950 border border-slate-800 rounded text-xs text-white px-2 py-1" />
+                                       <div className="col-span-2 flex justify-between gap-1">
+                                          {[1,2,3,4,5].map(day => (
+                                              <button key={day} onClick={() => {
+                                                  const days = autoSettings.activeDays.includes(day) 
+                                                    ? autoSettings.activeDays.filter(d => d !== day)
+                                                    : [...autoSettings.activeDays, day];
+                                                  setAutoSettings({...autoSettings, activeDays: days});
+                                              }} className={cn("w-6 h-6 text-[9px] rounded font-bold", autoSettings.activeDays.includes(day) ? "bg-green-600 text-white" : "bg-slate-800 text-slate-500")}>
+                                                  {['D','S','T','Q','Q','S','S'][day]}
+                                              </button>
+                                          ))}
+                                       </div>
+                                   </div>
+                               )}
+                           </div>
+                       </div>
+
+                       <Button 
+                         onClick={() => setIsAutoRunning(!isAutoRunning)}
+                         className={cn("w-full font-bold h-12 text-sm", isAutoRunning ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700")}
+                       >
+                           {isAutoRunning ? <><StopCircle className="mr-2 h-4 w-4" /> PARAR BOT</> : <><Play className="mr-2 h-4 w-4" /> INICIAR BOT</>}
+                       </Button>
+                    </div>
+                )}
+
+                {/* --- MODO SCANNER --- */}
+                {executionMode === 'SCANNER' && (
+                    <div className="flex-1 flex flex-col text-center justify-center text-slate-500">
+                        <Activity className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">Scanner de Oportunidades</p>
+                        <p className="text-xs">Em desenvolvimento para a próxima versão.</p>
+                    </div>
+                )}
+
              </CardContent>
           </Card>
         </div>
