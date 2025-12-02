@@ -7,11 +7,14 @@ export class DerivAPI {
     private onTickCallback: ((tick: any) => void) | null = null;
     private onBalanceCallback: ((balance: any) => void) | null = null;
     
+    // Callbacks para contratos abertos (Map: contract_id -> callback)
+    private contractCallbacks = new Map<number, (update: any) => void>();
+    
     // Controle de Requisições
     private reqIdCounter = 0;
     private pendingRequests = new Map<number, { resolve: (value: any) => void, reject: (reason?: any) => void }>();
     
-    // Lock de Conexão (Evita múltiplas conexões ao mesmo tempo)
+    // Lock de Conexão
     private connectionPromise: Promise<any> | null = null;
   
     constructor() {
@@ -19,23 +22,18 @@ export class DerivAPI {
     }
   
     connect(): Promise<any> {
-      // Se já existe uma conexão em andamento, retorna a promise dela
-      if (this.connectionPromise) {
-          return this.connectionPromise;
-      }
+      if (this.connectionPromise) return this.connectionPromise;
 
       this.connectionPromise = new Promise((resolve, reject) => {
-        // Recarrega token do storage sempre que tentar conectar
         if (typeof window !== 'undefined') {
             this.token = localStorage.getItem('deriv_token');
         }
 
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          // Se já estiver conectado, revalida autorização
           if (this.token) {
               this.authorize(this.token)
                 .then(res => {
-                    this.connectionPromise = null; // Libera lock
+                    this.connectionPromise = null;
                     resolve(res);
                 })
                 .catch(() => {
@@ -66,7 +64,7 @@ export class DerivAPI {
                     resolve(res);
                 })
                 .catch(err => {
-                    console.error("Falha na autorização inicial:", err);
+                    console.error("Falha auth:", err);
                     this.connectionPromise = null;
                     resolve(null); 
                 });
@@ -80,13 +78,11 @@ export class DerivAPI {
           try {
             const data = JSON.parse(msg.data);
             
-            // 1. Tratamento de Requisições
+            // 1. Tratamento de Requisições Pendentes
             if (data.req_id && this.pendingRequests.has(data.req_id)) {
                 const { resolve, reject } = this.pendingRequests.get(data.req_id)!;
-                
                 if (data.error) {
-                    console.error("API Error:", data.error);
-                    // Não rejeita promise de conexão se for erro de auth, só loga
+                    // Não logar erro se for esperado (ex: forget)
                     resolve(data); 
                 } else {
                     resolve(data);
@@ -94,26 +90,33 @@ export class DerivAPI {
                 this.pendingRequests.delete(data.req_id);
             }
 
-            // 2. Streams
+            // 2. Streams (Tick, Balance, Contratos)
             if (data.msg_type === 'tick' && this.onTickCallback) {
                 this.onTickCallback(data.tick);
             }
             if (data.msg_type === 'balance' && this.onBalanceCallback && data.balance) {
                 this.onBalanceCallback(data.balance);
             }
+            // Atualização de Contrato em Tempo Real
+            if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
+                const contract = data.proposal_open_contract;
+                const contractId = contract.contract_id;
+                if (this.contractCallbacks.has(contractId)) {
+                    this.contractCallbacks.get(contractId)!(contract);
+                }
+            }
+
           } catch (e) {
-              console.error("Erro ao processar mensagem WS:", e);
+              console.error("Erro WS:", e);
           }
         };
   
         this.ws.onerror = (err) => {
-          console.error('❌ Erro WS Deriv:', err);
           this.connectionPromise = null;
           reject(err);
         };
   
         this.ws.onclose = () => {
-          console.log('⚠️ Conexão Deriv fechada');
           this.ws = null;
           this.connectionPromise = null;
         };
@@ -124,9 +127,6 @@ export class DerivAPI {
   
     authorize(token: string): Promise<any> {
       return this.send({ authorize: token }).then(res => {
-        if (res.authorize) {
-            console.log('🔓 Autorizado:', res.authorize?.email);
-        }
         return res;
       });
     }
@@ -136,6 +136,12 @@ export class DerivAPI {
         if (this.ws?.readyState === WebSocket.OPEN) {
              this.send({ balance: 1, subscribe: 1 }).catch(() => {});
         }
+    }
+
+    // Monitora um contrato específico até ele fechar
+    subscribeContract(contractId: number, callback: (update: any) => void) {
+        this.contractCallbacks.set(contractId, callback);
+        this.send({ proposal_open_contract: 1, contract_id: contractId, subscribe: 1 }).catch(console.error);
     }
   
     async getHistory(symbol: string, granularity: number = 60, count: number = 100) {
@@ -165,13 +171,8 @@ export class DerivAPI {
                 close: Number(c.close)
               }));
           }
-          if (response.history) {
-             // Fallback para ticks se candles falhar
-             return [];
-          }
           return [];
       } catch (e) {
-          console.error("Exception getHistory", e);
           return [];
       }
     }
@@ -209,16 +210,15 @@ export class DerivAPI {
     private send(data: any): Promise<any> {
       return new Promise((resolve, reject) => {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-           // Tenta reconectar e enviar
            this.connect().then(() => {
               if (this.ws?.readyState === WebSocket.OPEN) {
                  const req_id = ++this.reqIdCounter;
                  this.pendingRequests.set(req_id, { resolve, reject });
                  this.ws.send(JSON.stringify({ ...data, req_id }));
               } else {
-                 reject({ message: 'WebSocket Offline e falha ao reconectar' });
+                 reject({ message: 'WS Offline' });
               }
-           }).catch((e) => reject({ message: 'WebSocket Offline', error: e }));
+           }).catch((e) => reject({ message: 'WS Offline', error: e }));
            return;
         }
 
