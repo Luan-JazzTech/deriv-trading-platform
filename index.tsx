@@ -5,6 +5,7 @@ import { Layout } from './components/Layout';
 import { LoginView } from './views/LoginView';
 import { DashboardView } from './views/DashboardView';
 import { SettingsView } from './views/SettingsView';
+import { LogsView } from './views/LogsView';
 import { AlertTriangle, RefreshCcw } from 'lucide-react';
 
 // Tipos de rotas disponíveis
@@ -91,14 +92,20 @@ const App = () => {
         onChangeView={(view) => setCurrentView(view as ViewState)}
         onLogout={handleLogout}
         >
-        {currentView === 'dashboard' && <DashboardView />}
+        {/* 
+            ESTRATÉGIA DE PERSISTÊNCIA:
+            O DashboardView contém o Bot, o WebSocket e o estado das operações ativas.
+            Não podemos desmontá-lo (remover do DOM) quando o usuário troca de aba,
+            senão o Bot para e as operações somem.
+            Usamos 'display: none' (hidden) para mantê-lo rodando no fundo.
+        */}
+        <div className={currentView === 'dashboard' ? 'block h-full' : 'hidden'}>
+            <DashboardView />
+        </div>
+
+        {/* As outras telas carregam dados do banco, podem ser remontadas sem problemas */}
         {currentView === 'settings' && <SettingsView />}
-        {currentView === 'logs' && (
-            <div className="p-12 text-center text-slate-500">
-            <h2 className="text-2xl font-bold mb-2">Logs de Auditoria</h2>
-            <p>Histórico de operações será listado aqui na próxima fase.</p>
-            </div>
-        )}
+        {currentView === 'logs' && <LogsView />}
         </Layout>
     </ErrorBoundary>
   );
