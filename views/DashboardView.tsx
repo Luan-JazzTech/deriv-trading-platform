@@ -43,7 +43,7 @@ interface TradeActivity {
     amount: number;
     status: 'PENDING' | 'WIN' | 'LOSS';
     profit?: number; // Lucro Realizado
-    currentProfit?: number; // Lucro Flutuante (indicativo)
+    potentialProfit?: number; // Payout estimado se ganhar
     startTime: number; // timestamp ms
     totalDurationSeconds: number; 
     expiryTime?: number; // timestamp ms 
@@ -345,6 +345,7 @@ export function DashboardView() {
                   if (update.entry_spot && !isNaN(update.entry_spot)) updatedTrade.entryPrice = Number(update.entry_spot);
                   if (update.current_spot && !isNaN(update.current_spot)) updatedTrade.currentPrice = Number(update.current_spot);
                   if (update.exit_tick && !isNaN(update.exit_tick)) updatedTrade.exitPrice = Number(update.exit_tick);
+                  if (update.payout && !isNaN(update.payout)) updatedTrade.potentialProfit = Number(update.payout) - updatedTrade.amount;
                   
                   // Calcular se está Ganhando ou Perdendo AGORA (Correção de lógica)
                   if (updatedTrade.entryPrice && updatedTrade.currentPrice) {
@@ -607,10 +608,17 @@ export function DashboardView() {
                                     
                                     {/* Status Real-time */}
                                     {trade.status === 'PENDING' && (
-                                        <div className={cn("px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider animate-pulse", 
-                                            trade.isWinning ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-                                        )}>
-                                            {trade.isWinning ? 'WINNING' : 'LOSING'}
+                                        <div className="flex items-center gap-2">
+                                            <div className={cn("px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider animate-pulse flex items-center gap-1", 
+                                                trade.isWinning ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                                            )}>
+                                                {trade.isWinning ? 'WINNING' : 'LOSING'}
+                                                <span className="font-mono ml-1">
+                                                    {trade.isWinning 
+                                                        ? `+${formatCurrency(trade.potentialProfit || (trade.amount * 0.95))}` 
+                                                        : `-${formatCurrency(trade.amount)}`}
+                                                </span>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -633,6 +641,12 @@ export function DashboardView() {
                                         <div className="flex flex-col items-end">
                                             <span className="text-[9px] uppercase font-bold text-slate-600">Stake</span>
                                             <span className="text-slate-300 font-bold">{formatCurrency(trade.amount)}</span>
+                                        </div>
+                                        <div className="flex flex-col items-end min-w-[60px]">
+                                            <span className="text-[9px] uppercase font-bold text-slate-600">Payout</span>
+                                            <span className="text-slate-300 font-bold font-mono">
+                                                {formatCurrency(trade.potentialProfit ? trade.potentialProfit + trade.amount : trade.amount * 1.95)}
+                                            </span>
                                         </div>
                                         
                                         {trade.status === 'PENDING' ? (
