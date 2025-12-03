@@ -7,6 +7,12 @@ import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 import { derivApi } from '../lib/deriv/api';
 import { supabase } from '../lib/supabase';
 
+// === IMPORTS DO SISTEMA PROFISSIONAL ===
+import { 
+    getAssetInfo, 
+    formatDurationForAPI 
+} from '../lib/deriv/durations';
+
 // --- CONFIGURAÇÃO DE ATIVOS REAIS (IDs da API Deriv) ---
 const AVAILABLE_ASSETS = [
   { id: '1HZ100V', name: 'Volatility 100 (1s)', type: 'synthetic', decimals: 2, group: 'Derived Indices' },
@@ -488,10 +494,37 @@ export function DashboardView() {
       setTradeLoading(true);
 
       try {
-          const durationSeconds = timeframe === 'M1' ? 60 : timeframe === 'M5' ? 300 : 900;
-          const durationUnit = 's';
+          // === CORREÇÃO: USAR DURAÇÃO CORRETA POR ATIVO ===
+          const assetInfo = getAssetInfo(activeAsset.id);
+          if (!assetInfo) {
+              console.error(`❌ Asset ${activeAsset.id} not found`);
+              alert(`Erro: Ativo ${activeAsset.id} não configurado`);
+              setTradeLoading(false);
+              return;
+          }
           
-          const response = await derivApi.buyContract(activeAsset.id, type, tradeStake, durationSeconds, durationUnit);
+          const duration = formatDurationForAPI(activeAsset.id);
+          console.log(`✅ Usando duração: ${duration} para ${activeAsset.name}`);
+          
+          // Converter duration para número e unit
+          const durationMatch = duration.match(/^(\d+)([tsmh])$/);
+          if (!durationMatch) {
+              console.error(`❌ Formato de duração inválido: ${duration}`);
+              setTradeLoading(false);
+              return;
+          }
+          
+          const durationValue = parseInt(durationMatch[1]);
+          const durationUnit = durationMatch[2];
+          
+          // Calcular duração em segundos para o timer local
+          let durationSeconds = durationValue;
+          if (durationUnit === 'm') durationSeconds = durationValue * 60;
+          else if (durationUnit === 'h') durationSeconds = durationValue * 3600;
+          else if (durationUnit === 't') durationSeconds = durationValue * 2; // Aproximação: 1 tick ≈ 2s
+          // === FIM DA CORREÇÃO ===
+          
+          const response = await derivApi.buyContract(activeAsset.id, type, tradeStake, durationValue, durationUnit);
 
           if (response.error) {
               alert(`Erro na Deriv: ${response.error.message}`);
