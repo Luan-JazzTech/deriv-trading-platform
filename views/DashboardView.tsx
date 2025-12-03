@@ -453,9 +453,13 @@ export function DashboardView() {
     const maxPrice = Math.max(...safeCandles.map(c => c.high));
     const priceRange = (maxPrice - minPrice) || 0.0001;
     
-    const width = 800; const height = 350; const padding = 40; const usableHeight = height - (padding * 2);
-    const candleWidth = (width / Math.max(safeCandles.length, 1)) * 0.7;
-    const spacing = (width / Math.max(safeCandles.length, 1));
+    const width = 800; const height = 350; const padding = 40; 
+    const paddingRight = 65; // Margem para a etiqueta de preço
+    const usableHeight = height - (padding * 2);
+    const usableWidth = width - paddingRight;
+
+    const candleWidth = (usableWidth / Math.max(safeCandles.length, 1)) * 0.7;
+    const spacing = (usableWidth / Math.max(safeCandles.length, 1));
     const formatPrice = (p: number) => typeof p === 'number' ? p.toFixed(activeAsset.decimals) : '0.00';
 
     return (
