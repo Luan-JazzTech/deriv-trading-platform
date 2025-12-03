@@ -657,15 +657,18 @@ export function DashboardView() {
                          });
                       }
 
-                      // CRÍTICO: Desinscrever do WebSocket após finalizar
-                      console.log(`🔌 Unsubscribe do contrato ${contractInfo.contract_id}`);
-                      derivApi.unsubscribeContract(contractInfo.contract_id);
-
-                      return { 
-                          ...updatedTrade, 
-                          status, 
-                          profit,
-                          isWinning: status === 'WIN'
+                      // Retornar trade com TODOS os campos atualizados
+                      const finalTrade = {
+                          ...updatedTrade,
+                          status: status,
+                          profit: profit,
+                          isWinning: status === 'WIN',
+                          exitPrice: updatedTrade.exitPrice || updatedTrade.currentPrice,
+                          currentPrice: updatedTrade.currentPrice
+                      };
+                      
+                      console.log(`✅ Trade finalizado:`, finalTrade);
+                      return finalTrade;
                       };
                   }
 
