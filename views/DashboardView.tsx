@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet, Timer as TimerIcon, StopCircle, Settings2, Sliders, Hourglass, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet, Timer as TimerIcon, StopCircle, Settings2, Sliders, Hourglass, ArrowUpRight, ArrowDownRight, RefreshCcw, Search } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 import { derivApi } from '../lib/deriv/api';
@@ -29,8 +29,9 @@ const AVAILABLE_ASSETS = [
 interface AssetRanking {
     id: string;
     name: string;
-    winRate: number;
-    direction: 'CALL' | 'PUT';
+    type: string;
+    direction: 'CALL' | 'PUT' | 'NEUTRO';
+    probability: number;
     score: number;
 }
 
@@ -86,6 +87,7 @@ export function DashboardView() {
   const [isAutoRunning, setIsAutoRunning] = useState(false);
   const [botStatus, setBotStatus] = useState<'IDLE' | 'RUNNING' | 'WAITING_SCHEDULE' | 'STOPPED_BY_RISK'>('IDLE');
   const [botTab, setBotTab] = useState<'CONFIG' | 'RISK'>('CONFIG'); // UI Tab
+  const [botLogs, setBotLogs] = useState<string[]>([]); // Logs de decisão do bot
 
   const [stopMode, setStopMode] = useState<'FINANCIAL' | 'QUANTITY'>('FINANCIAL');
   
@@ -102,6 +104,7 @@ export function DashboardView() {
   });
 
   const [marketRanking, setMarketRanking] = useState<AssetRanking[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
 
   // Configuração Global Manual
   const RISK_CONFIG = { maxTrades: 20, stopWin: 100.00, stopLoss: -50.00 };
@@ -116,6 +119,10 @@ export function DashboardView() {
   };
 
   const lastAutoTradeTimestamp = useRef<number>(0);
+
+  const addBotLog = (msg: string) => {
+      setBotLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 50));
+  };
   
   // --- TIMER GLOBAL PARA UI DE PROGRESSO ---
   useEffect(() => {
@@ -212,6 +219,13 @@ export function DashboardView() {
     if (candles && candles.length > 20) {
         const result = analyzeMarket(candles);
         setAnalysis(result);
+        
+        // Log para o Bot se estiver rodando
+        if (isAutoRunning && executionMode === 'AUTO') {
+            if(result.isSniperReady) {
+                 addBotLog(`SINAL ENCONTRADO! ${result.direction} (${result.probability}%)`);
+            }
+        }
     }
   }, [candles]);
 
@@ -235,6 +249,7 @@ export function DashboardView() {
           const currentDay = now.getDay();
           if (!autoSettings.activeDays.includes(currentDay)) { 
               setBotStatus('WAITING_SCHEDULE'); 
+              addBotLog("Aguardando dia da semana agendado...");
               return; 
           }
           const [startHour, startMin] = autoSettings.startTime.split(':').map(Number);
@@ -253,18 +268,22 @@ export function DashboardView() {
       if (isAutoLocked()) { 
           setBotStatus('STOPPED_BY_RISK'); 
           setIsAutoRunning(false); 
+          addBotLog("STOP ATINGIDO! Bot pausado.");
           return; 
       }
       
       setBotStatus('RUNNING');
       
-      if (analysis && analysis.isSniperReady) {
-          if (analysis.timestamp <= lastAutoTradeTimestamp.current) return;
-          if (cooldown > 0) return;
+      if (analysis) {
+          if (analysis.isSniperReady) {
+              if (analysis.timestamp <= lastAutoTradeTimestamp.current) return; // Já operou nesta vela
+              if (cooldown > 0) return;
 
-          if (analysis.direction === 'CALL' || analysis.direction === 'PUT') {
-              handleTrade(analysis.direction, autoSettings.stake);
-              lastAutoTradeTimestamp.current = analysis.timestamp;
+              if (analysis.direction === 'CALL' || analysis.direction === 'PUT') {
+                  addBotLog(`Executando ORDEM ${analysis.direction} - Stake: ${formatCurrency(autoSettings.stake)}`);
+                  handleTrade(analysis.direction, autoSettings.stake);
+                  lastAutoTradeTimestamp.current = analysis.timestamp;
+              }
           }
       }
   }, [analysis, isAutoRunning, executionMode, dailyStats, autoSettings, stopMode, cooldown]);
@@ -288,6 +307,7 @@ export function DashboardView() {
 
           if (response.error) {
               alert(`Erro na Deriv: ${response.error.message}`);
+              if (isAutoRunning) addBotLog(`ERRO DERIV: ${response.error.message}`);
               setTradeLoading(false);
               return;
           }
@@ -297,6 +317,7 @@ export function DashboardView() {
           
           // UI Optimistic Update
           setAccountInfo(prev => prev ? { ...prev, balance: prev.balance - tradeStake } : null);
+          if (isAutoRunning) addBotLog(`Ordem enviada! ID: ${contractInfo.contract_id}`);
 
           const newTrade: TradeActivity = {
               id: contractInfo.contract_id,
@@ -321,10 +342,11 @@ export function DashboardView() {
                   // Atualizar dados em tempo real
                   const updatedTrade = { ...t };
                   if (update.date_expiry) updatedTrade.expiryTime = update.date_expiry * 1000;
-                  if (update.entry_spot) updatedTrade.entryPrice = update.entry_spot;
-                  if (update.current_spot) updatedTrade.currentPrice = update.current_spot;
+                  if (update.entry_spot && !isNaN(update.entry_spot)) updatedTrade.entryPrice = Number(update.entry_spot);
+                  if (update.current_spot && !isNaN(update.current_spot)) updatedTrade.currentPrice = Number(update.current_spot);
+                  if (update.exit_tick && !isNaN(update.exit_tick)) updatedTrade.exitPrice = Number(update.exit_tick);
                   
-                  // Calcular se está Ganhando ou Perdendo AGORA
+                  // Calcular se está Ganhando ou Perdendo AGORA (Correção de lógica)
                   if (updatedTrade.entryPrice && updatedTrade.currentPrice) {
                       if (updatedTrade.type === 'CALL') {
                           updatedTrade.isWinning = updatedTrade.currentPrice > updatedTrade.entryPrice;
@@ -345,6 +367,8 @@ export function DashboardView() {
                              losses: stats.losses + (profit < 0 ? 1 : 0),
                              profit: stats.profit + profit
                          }));
+                         
+                         if(isAutoRunning) addBotLog(`Trade Fechado: ${status} (${formatCurrency(profit)})`);
 
                          // Salva no Supabase
                          supabase.from('trades_log').insert({
@@ -363,8 +387,8 @@ export function DashboardView() {
                       return { 
                           ...updatedTrade, 
                           status, 
-                          profit, 
-                          exitPrice: update.exit_tick 
+                          profit,
+                          isWinning: profit >= 0 
                       };
                   }
 
@@ -378,6 +402,36 @@ export function DashboardView() {
       } finally {
           setTradeLoading(false);
       }
+  };
+
+  const handleScanMarket = async () => {
+      setIsScanning(true);
+      setMarketRanking([]);
+      
+      const assetsToScan = AVAILABLE_ASSETS.slice(0, 5); // Scan top 5 assets to save API limits
+      const results: AssetRanking[] = [];
+
+      for (const asset of assetsToScan) {
+          try {
+              const history = await derivApi.getHistory(asset.id, 60, 50); // M1 Candles
+              if (history.length > 20) {
+                  const analysis = analyzeMarket(history);
+                  if (analysis.direction !== 'NEUTRO') {
+                      results.push({
+                          id: asset.id,
+                          name: asset.name,
+                          type: asset.type,
+                          direction: analysis.direction,
+                          probability: analysis.probability,
+                          score: analysis.score
+                      });
+                  }
+              }
+          } catch(e) { console.error(e); }
+      }
+
+      setMarketRanking(results.sort((a,b) => b.probability - a.probability));
+      setIsScanning(false);
   };
 
   const getAssetIcon = (type: string) => {
@@ -489,7 +543,9 @@ export function DashboardView() {
              )}
             <div className="px-5 py-2 border-l border-slate-800 flex flex-col items-end">
                 <span className="text-[9px] uppercase text-slate-500 font-bold">Lucro Sessão</span>
-                <span className={cn("text-xs font-bold font-mono", dailyStats.profit >= 0 ? "text-green-400" : "text-red-400")}>{formatCurrency(dailyStats.profit)}</span>
+                <span className={cn("text-xs font-bold font-mono", dailyStats.profit >= 0 ? "text-green-400" : "text-red-400")}>
+                    {dailyStats.profit >= 0 ? '+' : ''}{formatCurrency(dailyStats.profit)}
+                </span>
             </div>
         </div>
       </div>
@@ -705,7 +761,7 @@ export function DashboardView() {
                              onClick={() => setBotTab('RISK')}
                              className={cn("flex-1 py-2 text-[10px] font-bold rounded transition-colors flex items-center justify-center gap-2", botTab === 'RISK' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
                            >
-                               <ShieldAlert className="h-3 w-3" /> RISCO / AGENDAMENTO
+                               <ShieldAlert className="h-3 w-3" /> RISCO
                            </button>
                        </div>
 
@@ -717,17 +773,15 @@ export function DashboardView() {
                                        <input type="number" value={autoSettings.stake} onChange={(e) => setAutoSettings({...autoSettings, stake: Number(e.target.value)})} className="w-full h-12 bg-slate-950 border border-slate-700 rounded-lg pl-4 text-white font-black text-lg focus:ring-2 focus:ring-yellow-500/50 outline-none" placeholder="10.00" />
                                    </div>
                                    
+                                   {/* --- CÉREBRO DO BOT (LOGS) --- */}
                                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800">
-                                       <h5 className="text-[10px] font-bold text-slate-500 uppercase mb-2">Resumo da Sessão</h5>
-                                       <div className="grid grid-cols-2 gap-2 text-center">
-                                           <div className="bg-green-500/10 rounded p-2 border border-green-500/20">
-                                               <span className="block text-xl font-bold text-green-500">{dailyStats.wins}</span>
-                                               <span className="text-[9px] text-green-400 uppercase font-bold">Wins</span>
-                                           </div>
-                                           <div className="bg-red-500/10 rounded p-2 border border-red-500/20">
-                                               <span className="block text-xl font-bold text-red-500">{dailyStats.losses}</span>
-                                               <span className="text-[9px] text-red-400 uppercase font-bold">Losses</span>
-                                           </div>
+                                       <h5 className="text-[10px] font-bold text-slate-500 uppercase mb-2 flex items-center gap-2"><Zap className="h-3 w-3 text-yellow-500"/> Log de Decisão (Cérebro)</h5>
+                                       <div className="h-32 overflow-y-auto space-y-1 bg-slate-900/50 p-2 rounded text-[10px] font-mono border border-slate-800/50">
+                                           {botLogs.length === 0 ? <span className="text-slate-600 italic">Bot aguardando início...</span> : 
+                                             botLogs.map((log, i) => (
+                                                 <div key={i} className="text-slate-400 border-b border-slate-800/30 pb-0.5 mb-0.5 last:border-0">{log}</div>
+                                             ))
+                                           }
                                        </div>
                                    </div>
                                </div>
@@ -807,10 +861,41 @@ export function DashboardView() {
 
                 {/* --- MODO SCANNER --- */}
                 {executionMode === 'SCANNER' && (
-                    <div className="flex-1 flex flex-col text-center justify-center text-slate-500">
-                        <Activity className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">Scanner de Oportunidades</p>
-                        <p className="text-xs">Em desenvolvimento para a próxima versão.</p>
+                    <div className="flex-1 flex flex-col gap-4">
+                        <div className="text-center py-2 bg-slate-950 rounded border border-slate-800">
+                             <h4 className="text-xs font-bold text-slate-400 uppercase">Scanner de Oportunidades</h4>
+                        </div>
+                        
+                        {isScanning ? (
+                            <div className="flex-1 flex items-center justify-center flex-col gap-2 text-slate-500">
+                                <RefreshCcw className="h-8 w-8 animate-spin text-purple-500" />
+                                <span className="text-xs animate-pulse">Analisando mercados...</span>
+                            </div>
+                        ) : marketRanking.length > 0 ? (
+                            <div className="flex-1 overflow-y-auto space-y-2">
+                                {marketRanking.map((rank, i) => (
+                                    <div key={rank.id} onClick={() => setActiveAsset(AVAILABLE_ASSETS.find(a=>a.id===rank.id)!)} className="bg-slate-950 p-3 rounded-lg border border-slate-800 hover:border-purple-500 cursor-pointer transition-all">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <span className="text-xs font-bold text-white">{rank.name}</span>
+                                            <span className={cn("text-[10px] font-black px-1.5 py-0.5 rounded", rank.direction === 'CALL' ? "bg-green-500 text-slate-900" : "bg-red-500 text-white")}>{rank.direction}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center text-[10px] text-slate-500">
+                                            <span>Probabilidade: <b className="text-white">{rank.probability}%</b></span>
+                                            <span>Score: {rank.score}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-center px-4">
+                                <Search className="h-8 w-8 mb-2 opacity-50" />
+                                <p className="text-xs">Clique abaixo para escanear os melhores ativos do momento.</p>
+                            </div>
+                        )}
+                        
+                        <Button onClick={handleScanMarket} disabled={isScanning} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold h-12">
+                            {isScanning ? 'ESCANEANDO...' : 'ESCANEAR MERCADO'}
+                        </Button>
                     </div>
                 )}
 
