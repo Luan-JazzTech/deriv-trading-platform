@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet, Timer as TimerIcon, StopCircle, Settings2, Sliders, Hourglass } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet, Timer as TimerIcon, StopCircle, Settings2, Sliders, Hourglass, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 import { derivApi } from '../lib/deriv/api';
@@ -41,10 +41,15 @@ interface TradeActivity {
     type: 'CALL' | 'PUT';
     amount: number;
     status: 'PENDING' | 'WIN' | 'LOSS';
-    profit?: number;
+    profit?: number; // Lucro Realizado
+    currentProfit?: number; // Lucro Flutuante (indicativo)
     startTime: number; // timestamp ms
-    totalDurationSeconds: number; // duração total em segundos
-    expiryTime?: number; // timestamp ms (previsão ou real da API)
+    totalDurationSeconds: number; 
+    expiryTime?: number; // timestamp ms 
+    entryPrice?: number;
+    currentPrice?: number;
+    exitPrice?: number;
+    isWinning?: boolean; // Status calculado em tempo real
 }
 
 interface AccountInfo {
@@ -116,7 +121,7 @@ export function DashboardView() {
   useEffect(() => {
     const interval = setInterval(() => {
         setTick(t => t + 1);
-    }, 200); // Atualiza a cada 200ms para animação fluida
+    }, 500); // Atualiza UI a cada 500ms
     return () => clearInterval(interval);
   }, []);
 
@@ -228,12 +233,10 @@ export function DashboardView() {
       if (autoSettings.scheduleEnabled) {
           const now = new Date();
           const currentDay = now.getDay();
-          // Verifica dia da semana
           if (!autoSettings.activeDays.includes(currentDay)) { 
               setBotStatus('WAITING_SCHEDULE'); 
               return; 
           }
-          // Verifica hora
           const [startHour, startMin] = autoSettings.startTime.split(':').map(Number);
           const [endHour, endMin] = autoSettings.endTime.split(':').map(Number);
           
@@ -247,16 +250,14 @@ export function DashboardView() {
           }
       }
       
-      // Verificar travas de risco
       if (isAutoLocked()) { 
           setBotStatus('STOPPED_BY_RISK'); 
-          setIsAutoRunning(false); // Para o bot automaticamente
+          setIsAutoRunning(false); 
           return; 
       }
       
       setBotStatus('RUNNING');
       
-      // Execução
       if (analysis && analysis.isSniperReady) {
           if (analysis.timestamp <= lastAutoTradeTimestamp.current) return;
           if (cooldown > 0) return;
@@ -281,7 +282,7 @@ export function DashboardView() {
 
       try {
           const durationSeconds = timeframe === 'M1' ? 60 : timeframe === 'M5' ? 300 : 900;
-          const durationUnit = 's'; // Usando segundos para maior precisão de progresso
+          const durationUnit = 's';
           
           const response = await derivApi.buyContract(activeAsset.id, type, tradeStake, durationSeconds, durationUnit);
 
@@ -294,10 +295,9 @@ export function DashboardView() {
           const contractInfo = response.buy;
           const startTime = Date.now();
           
-          // --- ATUALIZAÇÃO OTIMISTA DO SALDO ---
+          // UI Optimistic Update
           setAccountInfo(prev => prev ? { ...prev, balance: prev.balance - tradeStake } : null);
 
-          // Adiciona ao log visual como PENDING com dados de tempo
           const newTrade: TradeActivity = {
               id: contractInfo.contract_id,
               asset: activeAsset.name,
@@ -307,56 +307,69 @@ export function DashboardView() {
               status: 'PENDING',
               startTime: startTime,
               totalDurationSeconds: durationSeconds,
-              // Estimativa inicial, será atualizada pelo subscribeContract
               expiryTime: startTime + (durationSeconds * 1000) 
           };
           setLiveTrades(prev => [newTrade, ...prev]);
-          setCooldown(5); // 5 segundos de intervalo
+          setCooldown(3); 
 
           // MONITORAR O CONTRATO ATÉ FECHAR
           derivApi.subscribeContract(contractInfo.contract_id, (update) => {
               
-              // Atualiza o expiryTime se a API mandar a data oficial
-              if (update.date_expiry) {
-                  setLiveTrades(prev => prev.map(t => 
-                      t.id === contractInfo.contract_id 
-                      ? { ...t, expiryTime: update.date_expiry * 1000 } 
-                      : t
-                  ));
-              }
+              setLiveTrades(prev => prev.map(t => {
+                  if (t.id !== contractInfo.contract_id) return t;
 
-              if (update.is_sold) {
-                  const profit = Number(update.profit);
-                  const status = profit >= 0 ? 'WIN' : 'LOSS';
+                  // Atualizar dados em tempo real
+                  const updatedTrade = { ...t };
+                  if (update.date_expiry) updatedTrade.expiryTime = update.date_expiry * 1000;
+                  if (update.entry_spot) updatedTrade.entryPrice = update.entry_spot;
+                  if (update.current_spot) updatedTrade.currentPrice = update.current_spot;
                   
-                  // Atualiza UI final
-                  setLiveTrades(prev => prev.map(t => 
-                      t.id === contractInfo.contract_id 
-                      ? { ...t, status, profit } 
-                      : t
-                  ));
+                  // Calcular se está Ganhando ou Perdendo AGORA
+                  if (updatedTrade.entryPrice && updatedTrade.currentPrice) {
+                      if (updatedTrade.type === 'CALL') {
+                          updatedTrade.isWinning = updatedTrade.currentPrice > updatedTrade.entryPrice;
+                      } else {
+                          updatedTrade.isWinning = updatedTrade.currentPrice < updatedTrade.entryPrice;
+                      }
+                  }
 
-                  // Atualiza Stats do Dia
-                  setDailyStats(prev => ({
-                      trades: prev.trades + 1,
-                      wins: prev.wins + (profit >= 0 ? 1 : 0),
-                      losses: prev.losses + (profit < 0 ? 1 : 0),
-                      profit: prev.profit + profit
-                  }));
+                  if (update.is_sold) {
+                      const profit = Number(update.profit);
+                      const status = profit >= 0 ? 'WIN' : 'LOSS';
+                      
+                      // Atualiza Stats do Dia
+                      if (t.status === 'PENDING') { // Só atualiza stats uma vez
+                         setDailyStats(stats => ({
+                             trades: stats.trades + 1,
+                             wins: stats.wins + (profit >= 0 ? 1 : 0),
+                             losses: stats.losses + (profit < 0 ? 1 : 0),
+                             profit: stats.profit + profit
+                         }));
 
-                  // Salva no Banco de Dados Supabase
-                  supabase.from('trades_log').insert({
-                      symbol: activeAsset.name,
-                      direction: type,
-                      stake: tradeStake,
-                      duration: `${durationSeconds}s`,
-                      result: status,
-                      profit: profit,
-                      deriv_contract_id: contractInfo.contract_id
-                  }).then((res) => {
-                      if(res.error) console.error("Erro ao salvar log:", res.error);
-                  });
-              }
+                         // Salva no Supabase
+                         supabase.from('trades_log').insert({
+                             symbol: activeAsset.name,
+                             direction: type,
+                             stake: tradeStake,
+                             duration: `${durationSeconds}s`,
+                             result: status,
+                             profit: profit,
+                             deriv_contract_id: contractInfo.contract_id
+                         }).then((res) => {
+                             if(res.error) console.error("Erro log Supabase:", res.error);
+                         });
+                      }
+
+                      return { 
+                          ...updatedTrade, 
+                          status, 
+                          profit, 
+                          exitPrice: update.exit_tick 
+                      };
+                  }
+
+                  return updatedTrade;
+              }));
           });
 
       } catch (err) {
@@ -501,48 +514,76 @@ export function DashboardView() {
             </div>
           </Card>
 
-          {/* --- PAINEL DE ATIVIDADE AO VIVO (COM TIMER E PROGRESSO) --- */}
+          {/* --- PAINEL DE ATIVIDADE AO VIVO (COM STATUS DINÂMICO) --- */}
           {liveTrades.length > 0 && (
-              <div className="h-[200px] bg-slate-900 border border-slate-800 rounded-lg overflow-hidden flex flex-col">
+              <div className="h-[240px] bg-slate-900 border border-slate-800 rounded-lg overflow-hidden flex flex-col">
                   <div className="px-4 py-2 bg-slate-950 border-b border-slate-800 flex items-center gap-2">
                       <Hourglass className="h-4 w-4 text-slate-400" />
-                      <span className="text-xs font-bold text-slate-300 uppercase">Operações Ativas & Recentes</span>
+                      <span className="text-xs font-bold text-slate-300 uppercase">Operações Ativas & Histórico Recente</span>
                   </div>
                   <div className="flex-1 overflow-y-auto p-2 space-y-2">
                       {liveTrades.map((trade, idx) => {
-                          // Lógica do Timer e Progresso
                           const now = Date.now();
                           const expiry = trade.expiryTime || (trade.startTime + (trade.totalDurationSeconds * 1000));
                           const timeLeftMs = Math.max(0, expiry - now);
                           const timeLeftSeconds = Math.ceil(timeLeftMs / 1000);
                           const progress = Math.min(100, Math.max(0, 100 - (timeLeftMs / (trade.totalDurationSeconds * 1000) * 100)));
                           
-                          const isFinished = trade.status !== 'PENDING';
-
                           return (
-                            <div key={idx} className={cn("relative overflow-hidden flex flex-col p-2 rounded text-xs border transition-colors", 
-                                trade.status === 'PENDING' ? "bg-slate-800/50 border-slate-700/50" : 
-                                trade.status === 'WIN' ? "bg-green-900/10 border-green-500/20" : 
-                                "bg-red-900/10 border-red-500/20")}>
+                            <div key={idx} className={cn("relative overflow-hidden flex flex-col p-3 rounded-lg text-xs border transition-colors", 
+                                trade.status === 'PENDING' ? "bg-slate-800/40 border-slate-700/50" : 
+                                trade.status === 'WIN' ? "bg-green-950/20 border-green-500/20" : 
+                                "bg-red-950/20 border-red-500/20")}>
                                 
-                                {/* Linha Principal */}
-                                <div className="flex items-center justify-between z-10 relative">
+                                {/* Info Principal */}
+                                <div className="flex items-center justify-between z-10 relative mb-1">
                                     <div className="flex items-center gap-3">
-                                        <span className="text-slate-500 font-mono">{trade.time}</span>
-                                        <span className="font-bold text-white">{trade.asset}</span>
-                                        <span className={cn("px-1.5 py-0.5 rounded font-black text-[10px]", trade.type === 'CALL' ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400")}>{trade.type}</span>
+                                        <span className="text-slate-500 font-mono text-[10px]">{trade.time}</span>
+                                        <div className="flex items-center gap-1">
+                                            {trade.type === 'CALL' ? <ArrowUpRight className="h-4 w-4 text-green-500"/> : <ArrowDownRight className="h-4 w-4 text-red-500"/>}
+                                            <span className="font-bold text-white text-sm">{trade.asset}</span>
+                                        </div>
                                     </div>
+                                    
+                                    {/* Status Real-time */}
+                                    {trade.status === 'PENDING' && (
+                                        <div className={cn("px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider animate-pulse", 
+                                            trade.isWinning ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                                        )}>
+                                            {trade.isWinning ? 'WINNING' : 'LOSING'}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="flex items-center justify-between z-10 relative">
+                                    <div className="flex items-center gap-4 text-[11px] text-slate-400">
+                                        <div className="flex flex-col">
+                                            <span className="text-[9px] uppercase font-bold text-slate-600">Entrada</span>
+                                            <span className="font-mono text-slate-300">{trade.entryPrice?.toFixed(activeAsset.decimals) || '---'}</span>
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="text-[9px] uppercase font-bold text-slate-600">Atual / Saída</span>
+                                            <span className={cn("font-mono font-bold", trade.isWinning ? "text-green-400" : "text-red-400")}>
+                                                {(trade.status === 'PENDING' ? trade.currentPrice : trade.exitPrice)?.toFixed(activeAsset.decimals) || '---'}
+                                            </span>
+                                        </div>
+                                    </div>
+
                                     <div className="flex items-center gap-3">
-                                        <span className="text-slate-300 font-bold">{formatCurrency(trade.amount)}</span>
+                                        <div className="flex flex-col items-end">
+                                            <span className="text-[9px] uppercase font-bold text-slate-600">Stake</span>
+                                            <span className="text-slate-300 font-bold">{formatCurrency(trade.amount)}</span>
+                                        </div>
+                                        
                                         {trade.status === 'PENDING' ? (
-                                            <div className="flex items-center gap-2 min-w-[80px] justify-end">
+                                            <div className="flex items-center gap-2 min-w-[70px] justify-end bg-slate-900 px-2 py-1 rounded border border-slate-800">
                                                 <span className="font-mono font-bold text-yellow-500">{Math.floor(timeLeftSeconds / 60).toString().padStart(2,'0')}:{Math.floor(timeLeftSeconds % 60).toString().padStart(2,'0')}</span>
                                                 <TimerIcon className="h-3 w-3 text-yellow-500 animate-spin" />
                                             </div>
                                         ) : (
-                                            <span className={cn("text-[10px] px-2 py-0.5 rounded border font-bold min-w-[80px] text-center", 
-                                                trade.status === 'WIN' ? "bg-green-500/10 text-green-500 border-green-500/20" : 
-                                                "bg-red-500/10 text-red-500 border-red-500/20"
+                                            <span className={cn("text-xs px-3 py-1 rounded border font-black min-w-[70px] text-center", 
+                                                trade.status === 'WIN' ? "bg-green-500 text-white border-green-600" : 
+                                                "bg-red-500 text-white border-red-600"
                                             )}>
                                                 {trade.status === 'WIN' ? `+${formatCurrency(trade.profit || 0)}` : formatCurrency(trade.profit || 0)}
                                             </span>
@@ -550,11 +591,11 @@ export function DashboardView() {
                                     </div>
                                 </div>
                                 
-                                {/* Barra de Progresso (Apenas para Pending) */}
+                                {/* Barra de Progresso */}
                                 {trade.status === 'PENDING' && (
-                                    <div className="mt-2 h-1 w-full bg-slate-700 rounded-full overflow-hidden">
+                                    <div className="mt-2 h-1 w-full bg-slate-800 rounded-full overflow-hidden">
                                         <div 
-                                            className="h-full bg-yellow-500/50 transition-all duration-200 ease-linear" 
+                                            className={cn("h-full transition-all duration-500 ease-linear", trade.isWinning ? "bg-green-500" : "bg-red-500")}
                                             style={{ width: `${progress}%` }} 
                                         />
                                     </div>
@@ -633,7 +674,7 @@ export function DashboardView() {
                     </div>
                 )}
 
-                {/* --- MODO AUTO (BOT UI REDESIGNED) --- */}
+                {/* --- MODO AUTO (BOT UI) --- */}
                 {executionMode === 'AUTO' && (
                     <div className="space-y-4 flex flex-col h-full">
                        {/* BOT STATUS HEADER */}
