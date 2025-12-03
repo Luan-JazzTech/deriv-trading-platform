@@ -50,6 +50,7 @@ interface TradeActivity {
     currentPrice?: number;
     exitPrice?: number;
     isWinning?: boolean;
+    source: 'MANUAL' | 'BOT'; // NOVO: Identificar origem do trade
 }
 
 interface AccountInfo {
@@ -450,7 +451,8 @@ export function DashboardView() {
               status: 'PENDING',
               startTime: startTime,
               totalDurationSeconds: durationSeconds,
-              expiryTime: startTime + (durationSeconds * 1000) 
+              expiryTime: startTime + (durationSeconds * 1000),
+              source: executionMode === 'AUTO' && isAutoRunning ? 'BOT' : 'MANUAL' // Identifica origem
           };
           setLiveTrades(prev => [newTrade, ...prev]);
           setCooldown(3); 
@@ -724,12 +726,24 @@ export function DashboardView() {
             </div>
           </Card>
 
-          {/* --- PAINEL DE ATIVIDADE AO VIVO --- */}
+          {/* --- PAINEL DE ATIVIDADE AO VIVO MELHORADO --- */}
           {liveTrades.length > 0 && (
-              <div className="h-[240px] bg-slate-900 border border-slate-800 rounded-lg overflow-hidden flex flex-col">
-                  <div className="px-4 py-2 bg-slate-950 border-b border-slate-800 flex items-center gap-2">
-                      <Hourglass className="h-4 w-4 text-slate-400" />
-                      <span className="text-xs font-bold text-slate-300 uppercase">Operações Ativas & Histórico Recente</span>
+              <div className="h-[280px] bg-slate-900 border border-slate-800 rounded-lg overflow-hidden flex flex-col">
+                  <div className="px-4 py-2 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                          <Hourglass className="h-4 w-4 text-slate-400" />
+                          <span className="text-xs font-bold text-slate-300 uppercase">Operações em Tempo Real</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px]">
+                          <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded">
+                              <MousePointerClick className="h-3 w-3 text-blue-400" />
+                              <span className="text-blue-400 font-bold">Manual</span>
+                          </div>
+                          <div className="flex items-center gap-1 px-2 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded">
+                              <Bot className="h-3 w-3 text-yellow-400" />
+                              <span className="text-yellow-400 font-bold">Bot</span>
+                          </div>
+                      </div>
                   </div>
                   <div className="flex-1 overflow-y-auto p-2 space-y-2">
                       {liveTrades.map((trade, idx) => {
@@ -738,29 +752,67 @@ export function DashboardView() {
                           const timeLeftMs = Math.max(0, expiry - now);
                           const timeLeftSeconds = Math.ceil(timeLeftMs / 1000);
                           const progress = Math.min(100, Math.max(0, 100 - (timeLeftMs / (trade.totalDurationSeconds * 1000) * 100)));
+                          const isFinished = trade.status !== 'PENDING';
                           
                           return (
-                            <div key={idx} className={cn("relative overflow-hidden flex flex-col p-3 rounded-lg text-xs border transition-colors", 
-                                trade.status === 'PENDING' ? "bg-slate-800/40 border-slate-700/50" : 
-                                trade.status === 'WIN' ? "bg-green-950/20 border-green-500/20" : 
-                                "bg-red-950/20 border-red-500/20")}>
+                            <div key={idx} className={cn("relative overflow-hidden flex flex-col p-3 rounded-lg text-xs border transition-all", 
+                                trade.status === 'PENDING' ? "bg-slate-800/40 border-slate-700/50 shadow-md" : 
+                                trade.status === 'WIN' ? "bg-green-950/20 border-green-500/30 shadow-lg shadow-green-500/10" : 
+                                "bg-red-950/20 border-red-500/30 shadow-lg shadow-red-500/10")}>
                                 
-                                <div className="flex items-center justify-between z-10 relative mb-1">
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-slate-500 font-mono text-[10px]">{trade.time}</span>
-                                        <div className="flex items-center gap-1">
-                                            {trade.type === 'CALL' ? <ArrowUpRight className="h-4 w-4 text-green-500"/> : <ArrowDownRight className="h-4 w-4 text-red-500"/>}
+                                {/* HEADER COM ORIGEM E HORÁRIO */}
+                                <div className="flex items-center justify-between z-10 relative mb-2">
+                                    <div className="flex items-center gap-2">
+                                        {/* Badge de Origem (MANUAL/BOT) */}
+                                        <div className={cn("px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider flex items-center gap-1 border",
+                                            trade.source === 'BOT' 
+                                                ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" 
+                                                : "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                                        )}>
+                                            {trade.source === 'BOT' ? <Bot className="h-3 w-3" /> : <MousePointerClick className="h-3 w-3" />}
+                                            {trade.source}
+                                        </div>
+                                        
+                                        {/* Status Badge */}
+                                        {isFinished && (
+                                            <div className={cn("px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider flex items-center gap-1",
+                                                trade.status === 'WIN' 
+                                                    ? "bg-green-500/30 text-green-300 border border-green-500/50" 
+                                                    : "bg-red-500/30 text-red-300 border border-red-500/50"
+                                            )}>
+                                                {trade.status === 'WIN' ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                                                {trade.status === 'WIN' ? 'FINALIZADO ✓' : 'FINALIZADO ✗'}
+                                            </div>
+                                        )}
+                                        
+                                        {!isFinished && (
+                                            <div className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 animate-pulse">
+                                                ⏳ EM ANDAMENTO
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    <span className="text-slate-500 font-mono text-[10px]">{trade.time}</span>
+                                </div>
+
+                                {/* INFORMAÇÕES DO ATIVO E DIREÇÃO */}
+                                <div className="flex items-center justify-between z-10 relative mb-2">
+                                    <div className="flex items-center gap-2">
+                                        {trade.type === 'CALL' ? <ArrowUpRight className="h-5 w-5 text-green-500"/> : <ArrowDownRight className="h-5 w-5 text-red-500"/>}
+                                        <div className="flex flex-col">
                                             <span className="font-bold text-white text-sm">{trade.asset}</span>
+                                            <span className="text-[9px] text-slate-500 uppercase font-bold">{trade.type} • ID: {String(trade.id).slice(-8)}</span>
                                         </div>
                                     </div>
                                     
-                                    {trade.status === 'PENDING' && (
+                                    {/* STATUS EM TEMPO REAL (Apenas para trades pendentes) */}
+                                    {!isFinished && (
                                         <div className="flex items-center gap-2">
-                                            <div className={cn("px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider animate-pulse flex items-center gap-1", 
-                                                trade.isWinning ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                                            <div className={cn("px-2 py-1 rounded text-[11px] font-black uppercase tracking-wider animate-pulse flex items-center gap-1 border-2", 
+                                                trade.isWinning ? "bg-green-500/30 text-green-300 border-green-500" : "bg-red-500/30 text-red-300 border-red-500"
                                             )}>
-                                                {trade.isWinning ? 'WINNING' : 'LOSING'}
-                                                <span className="font-mono ml-1">
+                                                {trade.isWinning ? '📈 GANHANDO' : '📉 PERDENDO'}
+                                                <span className="font-mono ml-1 text-xs">
                                                     {trade.isWinning 
                                                         ? `+${formatCurrency(trade.potentialProfit || (trade.amount * 0.95))}` 
                                                         : `-${formatCurrency(trade.amount)}`}
@@ -770,52 +822,58 @@ export function DashboardView() {
                                     )}
                                 </div>
 
+                                {/* PREÇOS E VALORES */}
                                 <div className="flex items-center justify-between z-10 relative">
                                     <div className="flex items-center gap-4 text-[11px] text-slate-400">
-                                        <div className="flex flex-col">
-                                            <span className="text-[9px] uppercase font-bold text-slate-600">Entrada</span>
-                                            <span className="font-mono text-slate-300">{trade.entryPrice?.toFixed(activeAsset.decimals) || '---'}</span>
+                                        <div className="flex flex-col bg-slate-900/50 p-1.5 rounded border border-slate-800/50">
+                                            <span className="text-[8px] uppercase font-bold text-slate-600">Entrada</span>
+                                            <span className="font-mono text-slate-300 font-bold">{trade.entryPrice?.toFixed(activeAsset.decimals) || '---'}</span>
                                         </div>
-                                        <div className="flex flex-col">
-                                            <span className="text-[9px] uppercase font-bold text-slate-600">Atual / Saída</span>
-                                            <span className={cn("font-mono font-bold", trade.isWinning ? "text-green-400" : "text-red-400")}>
-                                                {(trade.status === 'PENDING' ? trade.currentPrice : trade.exitPrice)?.toFixed(activeAsset.decimals) || '---'}
+                                        <ArrowRight className="h-3 w-3 text-slate-600" />
+                                        <div className="flex flex-col bg-slate-900/50 p-1.5 rounded border border-slate-800/50">
+                                            <span className="text-[8px] uppercase font-bold text-slate-600">{isFinished ? 'Saída' : 'Atual'}</span>
+                                            <span className={cn("font-mono font-bold", 
+                                                isFinished 
+                                                    ? (trade.status === 'WIN' ? "text-green-400" : "text-red-400")
+                                                    : (trade.isWinning ? "text-green-400" : "text-red-400")
+                                            )}>
+                                                {(isFinished ? trade.exitPrice : trade.currentPrice)?.toFixed(activeAsset.decimals) || '---'}
                                             </span>
                                         </div>
                                     </div>
 
                                     <div className="flex items-center gap-3">
-                                        <div className="flex flex-col items-end">
-                                            <span className="text-[9px] uppercase font-bold text-slate-600">Stake</span>
-                                            <span className="text-slate-300 font-bold">{formatCurrency(trade.amount)}</span>
-                                        </div>
-                                        <div className="flex flex-col items-end min-w-[60px]">
-                                            <span className="text-[9px] uppercase font-bold text-slate-600">Payout</span>
-                                            <span className="text-slate-300 font-bold font-mono">
-                                                {formatCurrency(trade.potentialProfit ? trade.potentialProfit + trade.amount : trade.amount * 1.95)}
-                                            </span>
+                                        <div className="flex flex-col items-end bg-slate-900/50 p-1.5 rounded border border-slate-800/50">
+                                            <span className="text-[8px] uppercase font-bold text-slate-600">Stake</span>
+                                            <span className="text-slate-300 font-bold text-xs">{formatCurrency(trade.amount)}</span>
                                         </div>
                                         
-                                        {trade.status === 'PENDING' ? (
-                                            <div className="flex items-center gap-2 min-w-[70px] justify-end bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                                                <span className="font-mono font-bold text-yellow-500">{Math.floor(timeLeftSeconds / 60).toString().padStart(2,'0')}:{Math.floor(timeLeftSeconds % 60).toString().padStart(2,'0')}</span>
-                                                <TimerIcon className="h-3 w-3 text-yellow-500 animate-spin" />
+                                        {!isFinished ? (
+                                            <div className="flex items-center gap-2 min-w-[80px] justify-end bg-slate-900 px-3 py-2 rounded-lg border-2 border-yellow-500/50 shadow-lg shadow-yellow-500/20">
+                                                <TimerIcon className="h-4 w-4 text-yellow-500 animate-spin" />
+                                                <span className="font-mono font-bold text-yellow-400 text-sm">
+                                                    {Math.floor(timeLeftSeconds / 60).toString().padStart(2,'0')}:{Math.floor(timeLeftSeconds % 60).toString().padStart(2,'0')}
+                                                </span>
                                             </div>
                                         ) : (
-                                            <span className={cn("text-xs px-3 py-1 rounded border font-black min-w-[70px] text-center", 
-                                                trade.status === 'WIN' ? "bg-green-500 text-white border-green-600" : 
-                                                "bg-red-500 text-white border-red-600"
+                                            <div className={cn("text-sm px-4 py-2 rounded-lg border-2 font-black min-w-[90px] text-center shadow-lg", 
+                                                trade.status === 'WIN' 
+                                                    ? "bg-green-500/30 text-green-300 border-green-500 shadow-green-500/20" 
+                                                    : "bg-red-500/30 text-red-300 border-red-500 shadow-red-500/20"
                                             )}>
                                                 {trade.status === 'WIN' ? `+${formatCurrency(trade.profit || 0)}` : formatCurrency(trade.profit || 0)}
-                                            </span>
+                                            </div>
                                         )}
                                     </div>
                                 </div>
                                 
-                                {trade.status === 'PENDING' && (
-                                    <div className="mt-2 h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+                                {/* BARRA DE PROGRESSO (Apenas para trades pendentes) */}
+                                {!isFinished && (
+                                    <div className="mt-2.5 h-2 w-full bg-slate-800 rounded-full overflow-hidden border border-slate-700/50 shadow-inner">
                                         <div 
-                                            className={cn("h-full transition-all duration-500 ease-linear", trade.isWinning ? "bg-green-500" : "bg-red-500")}
+                                            className={cn("h-full transition-all duration-500 ease-linear shadow-lg", 
+                                                trade.isWinning ? "bg-gradient-to-r from-green-500 to-green-400" : "bg-gradient-to-r from-red-500 to-red-400"
+                                            )}
                                             style={{ width: `${progress}%` }} 
                                         />
                                     </div>
