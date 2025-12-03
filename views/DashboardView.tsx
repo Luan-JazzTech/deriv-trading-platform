@@ -6,6 +6,7 @@ import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 import { derivApi } from '../lib/deriv/api';
 import { supabase } from '../lib/supabase';
+import { getAssetInfo, formatDurationForAPI } from '../lib/deriv/durations';
 
 // === IMPORTS DO SISTEMA PROFISSIONAL ===
 import { 
