@@ -470,7 +470,12 @@ export function DashboardView() {
                   if (update.exit_tick && !isNaN(update.exit_tick)) updatedTrade.exitPrice = Number(update.exit_tick);
                   if (update.payout && !isNaN(update.payout)) updatedTrade.potentialProfit = Number(update.payout) - updatedTrade.amount;
                   
-                  if (updatedTrade.entryPrice && updatedTrade.currentPrice) {
+                  // IMPORTANTE: Em opções binárias, o status "isWinning" durante o trade
+                  // é apenas uma estimativa. O que importa é o preço NO MOMENTO DA EXPIRAÇÃO.
+                  // A API Deriv envia o status final via profit/is_sold.
+                  
+                  // Calcular status APENAS durante o trade (antes de finalizar)
+                  if (!update.is_sold && updatedTrade.entryPrice && updatedTrade.currentPrice) {
                       if (updatedTrade.type === 'CALL') {
                           updatedTrade.isWinning = updatedTrade.currentPrice > updatedTrade.entryPrice;
                       } else {
@@ -481,6 +486,18 @@ export function DashboardView() {
                   if (update.is_sold) {
                       const profit = Number(update.profit);
                       const status = profit >= 0 ? 'WIN' : 'LOSS';
+                      
+                      // Atualizar isWinning baseado no resultado REAL
+                      updatedTrade.isWinning = status === 'WIN';
+                      
+                      // Garantir que exitPrice esteja setado
+                      if (!updatedTrade.exitPrice && update.exit_tick) {
+                          updatedTrade.exitPrice = Number(update.exit_tick);
+                      }
+                      // Fallback: usar currentPrice se exitPrice não veio
+                      if (!updatedTrade.exitPrice && updatedTrade.currentPrice) {
+                          updatedTrade.exitPrice = updatedTrade.currentPrice;
+                      }
                       
                       if (t.status === 'PENDING') {
                          setDailyStats(stats => ({
@@ -537,7 +554,7 @@ export function DashboardView() {
                           ...updatedTrade, 
                           status, 
                           profit,
-                          isWinning: profit >= 0 
+                          isWinning: status === 'WIN'
                       };
                   }
 
@@ -753,6 +770,11 @@ export function DashboardView() {
                           const timeLeftSeconds = Math.ceil(timeLeftMs / 1000);
                           const progress = Math.min(100, Math.max(0, 100 - (timeLeftMs / (trade.totalDurationSeconds * 1000) * 100)));
                           const isFinished = trade.status !== 'PENDING';
+                          
+                          // DEBUG: Log quando timer zera mas ainda está PENDING
+                          if (timeLeftSeconds === 0 && trade.status === 'PENDING') {
+                              console.warn(`⚠️ Timer zerou mas trade ${trade.id} ainda está PENDING. Aguardando API...`);
+                          }
                           
                           return (
                             <div key={idx} className={cn("relative overflow-hidden flex flex-col p-3 rounded-lg text-xs border transition-all", 
