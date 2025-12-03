@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet, Timer as TimerIcon, StopCircle, Settings2, Sliders, Hourglass, ArrowUpRight, ArrowDownRight, RefreshCcw, Search } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, Lock, Zap, Clock, ShieldAlert, ChevronDown, Globe, Bitcoin, Box, Layers, BarChart3, Target, Flame, Bot, Play, Pause, CalendarClock, Timer, CalendarDays, Trophy, Hash, MousePointerClick, ArrowRight, XCircle, CheckCircle2, AlertTriangle, Wallet, Timer as TimerIcon, StopCircle, Settings2, Sliders, Hourglass, ArrowUpRight, ArrowDownRight, RefreshCcw, Search, Brain, Zap as Lightning, TrendingUp as TrendUp } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { analyzeMarket, Candle, AnalysisResult } from '../lib/analysis/engine';
 import { derivApi } from '../lib/deriv/api';
@@ -36,21 +35,21 @@ interface AssetRanking {
 }
 
 interface TradeActivity {
-    id: number; // Deriv contract_id é number
+    id: number;
     asset: string;
     time: string;
     type: 'CALL' | 'PUT';
     amount: number;
     status: 'PENDING' | 'WIN' | 'LOSS';
-    profit?: number; // Lucro Realizado
-    potentialProfit?: number; // Payout estimado se ganhar
-    startTime: number; // timestamp ms
+    profit?: number;
+    potentialProfit?: number;
+    startTime: number;
     totalDurationSeconds: number; 
-    expiryTime?: number; // timestamp ms 
+    expiryTime?: number;
     entryPrice?: number;
     currentPrice?: number;
     exitPrice?: number;
-    isWinning?: boolean; // Status calculado em tempo real
+    isWinning?: boolean;
 }
 
 interface AccountInfo {
@@ -58,6 +57,24 @@ interface AccountInfo {
     currency: string;
     isVirtual: boolean;
     email: string;
+}
+
+// --- MELHORIAS DO BOT: Sistema de Gerenciamento Avançado ---
+interface BotMetrics {
+    consecutiveWins: number;
+    consecutiveLosses: number;
+    lastTradeResult: 'WIN' | 'LOSS' | null;
+    hourlyTrades: number;
+    lastHourReset: number;
+}
+
+// Modo Martingale Opcional
+interface MartingaleConfig {
+    enabled: boolean;
+    multiplier: number; // Ex: 2.0 = dobra o stake após loss
+    maxLevel: number; // Ex: 3 = permite até 3 martingales
+    currentLevel: number;
+    resetOnWin: boolean;
 }
 
 export function DashboardView() {
@@ -77,30 +94,61 @@ export function DashboardView() {
   // --- GERENCIAMENTO DE RISCO SNIPER ---
   const [dailyStats, setDailyStats] = useState({ trades: 0, wins: 0, losses: 0, profit: 0 });
   const [liveTrades, setLiveTrades] = useState<TradeActivity[]>([]);
-  // Estado auxiliar para forçar re-render do timer
   const [, setTick] = useState(0);
 
   // --- MODO DE EXECUÇÃO ---
   const [executionMode, setExecutionMode] = useState<'MANUAL' | 'AUTO' | 'SCANNER'>('MANUAL');
   
-  // --- CONFIGURAÇÃO BOT ---
+  // --- CONFIGURAÇÃO BOT MELHORADA ---
   const [isAutoRunning, setIsAutoRunning] = useState(false);
-  const [botStatus, setBotStatus] = useState<'IDLE' | 'RUNNING' | 'WAITING_SCHEDULE' | 'STOPPED_BY_RISK'>('IDLE');
-  const [botTab, setBotTab] = useState<'CONFIG' | 'RISK'>('CONFIG'); // UI Tab
-  const [botLogs, setBotLogs] = useState<string[]>([]); // Logs de decisão do bot
+  const [botStatus, setBotStatus] = useState<'IDLE' | 'RUNNING' | 'WAITING_SCHEDULE' | 'STOPPED_BY_RISK' | 'WAITING_COOLDOWN' | 'ANALYZING'>('IDLE');
+  const [botTab, setBotTab] = useState<'CONFIG' | 'RISK' | 'ADVANCED'>('CONFIG');
+  const [botLogs, setBotLogs] = useState<string[]>([]);
 
   const [stopMode, setStopMode] = useState<'FINANCIAL' | 'QUANTITY'>('FINANCIAL');
   
+  // --- NOVAS CONFIGURAÇÕES DO BOT ---
   const [autoSettings, setAutoSettings] = useState({
       stake: 1.0,
       stopWinValue: 10.0,
       stopLossValue: 5.0,
-      stopWinCount: 2, 
-      stopLossCount: 1,
+      stopWinCount: 5, 
+      stopLossCount: 3,
       scheduleEnabled: false,
       startTime: '09:00',
       endTime: '17:00',
-      activeDays: [1, 2, 3, 4, 5] // 1=Seg, 5=Sex
+      activeDays: [1, 2, 3, 4, 5], // 1=Seg, 5=Sex
+      
+      // NOVO: Filtros de Qualidade
+      minProbability: 75, // Só opera sinais com 75%+
+      minScore: 50, // Score mínimo do sinal
+      
+      // NOVO: Cooldown entre trades
+      tradeCooldownSeconds: 60, // Espera 60s entre trades
+      
+      // NOVO: Limite de trades por hora
+      maxTradesPerHour: 10,
+      
+      // NOVO: Modo conservador (só opera com confluência máxima)
+      conservativeMode: false,
+  });
+
+  // --- MARTINGALE (OPCIONAL - ALTO RISCO) ---
+  const [martingaleConfig, setMartingaleConfig] = useState<MartingaleConfig>({
+      enabled: false,
+      multiplier: 2.0,
+      maxLevel: 3,
+      currentLevel: 0,
+      resetOnWin: true
+  });
+
+  // --- MÉTRICAS DO BOT ---
+  const [botMetrics, setBotMetrics] = useState<BotMetrics>({
+      consecutiveWins: 0,
+      consecutiveLosses: 0,
+      lastTradeResult: null,
+      hourlyTrades: 0,
+      lastHourReset: Date.now()
   });
 
   const [marketRanking, setMarketRanking] = useState<AssetRanking[]>([]);
@@ -119,18 +167,27 @@ export function DashboardView() {
   };
 
   const lastAutoTradeTimestamp = useRef<number>(0);
+  const lastTradeTime = useRef<number>(0);
 
-  const addBotLog = (msg: string) => {
-      setBotLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 50));
+  const addBotLog = (msg: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
+      const icon = type === 'success' ? '✅' : type === 'warning' ? '⚠️' : type === 'error' ? '❌' : 'ℹ️';
+      setBotLogs(prev => [`${icon} [${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 100));
   };
   
   // --- TIMER GLOBAL PARA UI DE PROGRESSO ---
   useEffect(() => {
     const interval = setInterval(() => {
         setTick(t => t + 1);
-    }, 500); // Atualiza UI a cada 500ms
+        
+        // Reset contador horário
+        const now = Date.now();
+        if (now - botMetrics.lastHourReset > 3600000) { // 1 hora
+            setBotMetrics(prev => ({ ...prev, hourlyTrades: 0, lastHourReset: now }));
+            addBotLog('Contador de trades por hora resetado', 'info');
+        }
+    }, 500);
     return () => clearInterval(interval);
-  }, []);
+  }, [botMetrics.lastHourReset]);
 
   // --- CONEXÃO COM API DERIV ---
   useEffect(() => {
@@ -219,13 +276,6 @@ export function DashboardView() {
     if (candles && candles.length > 20) {
         const result = analyzeMarket(candles);
         setAnalysis(result);
-        
-        // Log para o Bot se estiver rodando
-        if (isAutoRunning && executionMode === 'AUTO') {
-            if(result.isSniperReady) {
-                 addBotLog(`SINAL ENCONTRADO! ${result.direction} (${result.probability}%)`);
-            }
-        }
     }
   }, [candles]);
 
@@ -237,19 +287,19 @@ export function DashboardView() {
       }
   }, [cooldown]);
 
-  // --- LÓGICA DO BOT AUTOMÁTICO ---
+  // --- LÓGICA DO BOT AUTOMÁTICO MELHORADA ---
   useEffect(() => {
       if (!isAutoRunning || executionMode !== 'AUTO') {
           setBotStatus('IDLE');
           return;
       }
-      // Verificar agendamento
+      
+      // 1. Verificar agendamento
       if (autoSettings.scheduleEnabled) {
           const now = new Date();
           const currentDay = now.getDay();
           if (!autoSettings.activeDays.includes(currentDay)) { 
               setBotStatus('WAITING_SCHEDULE'); 
-              addBotLog("Aguardando dia da semana agendado...");
               return; 
           }
           const [startHour, startMin] = autoSettings.startTime.split(':').map(Number);
@@ -265,28 +315,100 @@ export function DashboardView() {
           }
       }
       
+      // 2. Verificar stop loss/win
       if (isAutoLocked()) { 
           setBotStatus('STOPPED_BY_RISK'); 
           setIsAutoRunning(false); 
-          addBotLog("STOP ATINGIDO! Bot pausado.");
+          addBotLog(`🛑 STOP ATINGIDO! ${stopMode === 'FINANCIAL' ? `Lucro: ${formatCurrency(dailyStats.profit)}` : `Wins: ${dailyStats.wins} | Losses: ${dailyStats.losses}`}`, 'warning');
           return; 
+      }
+      
+      // 3. Verificar limite de trades por hora
+      if (botMetrics.hourlyTrades >= autoSettings.maxTradesPerHour) {
+          setBotStatus('WAITING_COOLDOWN');
+          return;
+      }
+      
+      // 4. Verificar cooldown entre trades
+      const now = Date.now();
+      const timeSinceLastTrade = (now - lastTradeTime.current) / 1000; // segundos
+      if (timeSinceLastTrade < autoSettings.tradeCooldownSeconds) {
+          setBotStatus('WAITING_COOLDOWN');
+          return;
+      }
+      
+      // 5. Verificar sinal
+      if (!analysis) {
+          setBotStatus('ANALYZING');
+          return;
       }
       
       setBotStatus('RUNNING');
       
-      if (analysis) {
-          if (analysis.isSniperReady) {
-              if (analysis.timestamp <= lastAutoTradeTimestamp.current) return; // Já operou nesta vela
-              if (cooldown > 0) return;
+      // 6. Filtros de qualidade do sinal
+      if (analysis.isSniperReady) {
+          // Verificar se já operou nesta vela
+          if (analysis.timestamp <= lastAutoTradeTimestamp.current) return;
+          
+          // Verificar cooldown manual
+          if (cooldown > 0) return;
 
-              if (analysis.direction === 'CALL' || analysis.direction === 'PUT') {
-                  addBotLog(`Executando ORDEM ${analysis.direction} - Stake: ${formatCurrency(autoSettings.stake)}`);
-                  handleTrade(analysis.direction, autoSettings.stake);
-                  lastAutoTradeTimestamp.current = analysis.timestamp;
+          // Filtro de probabilidade mínima
+          if (analysis.probability < autoSettings.minProbability) {
+              addBotLog(`⏭️ Sinal ignorado: Probabilidade ${analysis.probability}% < ${autoSettings.minProbability}% (mínimo)`, 'info');
+              return;
+          }
+          
+          // Filtro de score mínimo
+          if (analysis.score < autoSettings.minScore) {
+              addBotLog(`⏭️ Sinal ignorado: Score ${analysis.score} < ${autoSettings.minScore} (mínimo)`, 'info');
+              return;
+          }
+          
+          // Modo conservador: exige confluência máxima
+          if (autoSettings.conservativeMode && analysis.probability < 85) {
+              addBotLog(`🛡️ Modo Conservador: Sinal ${analysis.probability}% não atinge 85% requerido`, 'info');
+              return;
+          }
+
+          // Verificar se deve evitar após losses consecutivas
+          if (botMetrics.consecutiveLosses >= 3 && !martingaleConfig.enabled) {
+              addBotLog(`⚠️ PAUSANDO: 3 losses consecutivas. Aguardando mercado estabilizar...`, 'warning');
+              setCooldown(120); // 2 minutos de pausa
+              return;
+          }
+
+          if (analysis.direction === 'CALL' || analysis.direction === 'PUT') {
+              // Calcular stake (com Martingale se habilitado)
+              let tradeStake = autoSettings.stake;
+              
+              if (martingaleConfig.enabled && martingaleConfig.currentLevel > 0) {
+                  tradeStake = autoSettings.stake * Math.pow(martingaleConfig.multiplier, martingaleConfig.currentLevel);
+                  
+                  // Verificar limite de martingale
+                  if (martingaleConfig.currentLevel >= martingaleConfig.maxLevel) {
+                      addBotLog(`🚫 Martingale máximo atingido. Resetando para stake base.`, 'warning');
+                      setMartingaleConfig(prev => ({ ...prev, currentLevel: 0 }));
+                      tradeStake = autoSettings.stake;
+                  }
+                  
+                  // Verificar se tem saldo suficiente
+                  if (accountInfo && tradeStake > accountInfo.balance * 0.1) { // Max 10% do saldo por trade
+                      addBotLog(`⚠️ Stake muito alto (${formatCurrency(tradeStake)}). Usando 10% do saldo.`, 'warning');
+                      tradeStake = accountInfo.balance * 0.1;
+                  }
               }
+              
+              addBotLog(`🎯 EXECUTANDO ${analysis.direction} | Prob: ${analysis.probability}% | Score: ${analysis.score} | Stake: ${formatCurrency(tradeStake)}`, 'success');
+              handleTrade(analysis.direction, tradeStake);
+              lastAutoTradeTimestamp.current = analysis.timestamp;
+              lastTradeTime.current = Date.now();
+              
+              // Incrementar contador horário
+              setBotMetrics(prev => ({ ...prev, hourlyTrades: prev.hourlyTrades + 1 }));
           }
       }
-  }, [analysis, isAutoRunning, executionMode, dailyStats, autoSettings, stopMode, cooldown]);
+  }, [analysis, isAutoRunning, executionMode, dailyStats, autoSettings, stopMode, cooldown, botMetrics, martingaleConfig, accountInfo]);
 
 
   const handleTrade = async (type: 'CALL' | 'PUT', tradeStake = stake) => {
@@ -307,7 +429,7 @@ export function DashboardView() {
 
           if (response.error) {
               alert(`Erro na Deriv: ${response.error.message}`);
-              if (isAutoRunning) addBotLog(`ERRO DERIV: ${response.error.message}`);
+              if (isAutoRunning) addBotLog(`❌ ERRO DERIV: ${response.error.message}`, 'error');
               setTradeLoading(false);
               return;
           }
@@ -317,7 +439,7 @@ export function DashboardView() {
           
           // UI Optimistic Update
           setAccountInfo(prev => prev ? { ...prev, balance: prev.balance - tradeStake } : null);
-          if (isAutoRunning) addBotLog(`Ordem enviada! ID: ${contractInfo.contract_id}`);
+          if (isAutoRunning) addBotLog(`📤 Ordem enviada! ID: ${contractInfo.contract_id}`, 'info');
 
           const newTrade: TradeActivity = {
               id: contractInfo.contract_id,
@@ -339,7 +461,6 @@ export function DashboardView() {
               setLiveTrades(prev => prev.map(t => {
                   if (t.id !== contractInfo.contract_id) return t;
 
-                  // Atualizar dados em tempo real
                   const updatedTrade = { ...t };
                   if (update.date_expiry) updatedTrade.expiryTime = update.date_expiry * 1000;
                   if (update.entry_spot && !isNaN(update.entry_spot)) updatedTrade.entryPrice = Number(update.entry_spot);
@@ -347,7 +468,6 @@ export function DashboardView() {
                   if (update.exit_tick && !isNaN(update.exit_tick)) updatedTrade.exitPrice = Number(update.exit_tick);
                   if (update.payout && !isNaN(update.payout)) updatedTrade.potentialProfit = Number(update.payout) - updatedTrade.amount;
                   
-                  // Calcular se está Ganhando ou Perdendo AGORA (Correção de lógica)
                   if (updatedTrade.entryPrice && updatedTrade.currentPrice) {
                       if (updatedTrade.type === 'CALL') {
                           updatedTrade.isWinning = updatedTrade.currentPrice > updatedTrade.entryPrice;
@@ -360,8 +480,7 @@ export function DashboardView() {
                       const profit = Number(update.profit);
                       const status = profit >= 0 ? 'WIN' : 'LOSS';
                       
-                      // Atualiza Stats do Dia
-                      if (t.status === 'PENDING') { // Só atualiza stats uma vez
+                      if (t.status === 'PENDING') {
                          setDailyStats(stats => ({
                              trades: stats.trades + 1,
                              wins: stats.wins + (profit >= 0 ? 1 : 0),
@@ -369,9 +488,36 @@ export function DashboardView() {
                              profit: stats.profit + profit
                          }));
                          
-                         if(isAutoRunning) addBotLog(`Trade Fechado: ${status} (${formatCurrency(profit)})`);
+                         // Atualizar métricas do bot
+                         setBotMetrics(prev => {
+                             const newMetrics = { ...prev, lastTradeResult: status };
+                             if (status === 'WIN') {
+                                 newMetrics.consecutiveWins = prev.consecutiveWins + 1;
+                                 newMetrics.consecutiveLosses = 0;
+                             } else {
+                                 newMetrics.consecutiveLosses = prev.consecutiveLosses + 1;
+                                 newMetrics.consecutiveWins = 0;
+                             }
+                             return newMetrics;
+                         });
+                         
+                         // Atualizar Martingale
+                         if (martingaleConfig.enabled) {
+                             setMartingaleConfig(prev => {
+                                 if (status === 'WIN' && prev.resetOnWin) {
+                                     return { ...prev, currentLevel: 0 };
+                                 } else if (status === 'LOSS') {
+                                     return { ...prev, currentLevel: Math.min(prev.currentLevel + 1, prev.maxLevel) };
+                                 }
+                                 return prev;
+                             });
+                         }
+                         
+                         if(isAutoRunning) {
+                             const emoji = status === 'WIN' ? '🎉' : '😔';
+                             addBotLog(`${emoji} Trade Fechado: ${status} | P&L: ${formatCurrency(profit)}`, status === 'WIN' ? 'success' : 'error');
+                         }
 
-                         // Salva no Supabase
                          supabase.from('trades_log').insert({
                              symbol: activeAsset.name,
                              direction: type,
@@ -400,6 +546,7 @@ export function DashboardView() {
       } catch (err) {
           console.error(err);
           alert('Falha ao enviar ordem.');
+          if (isAutoRunning) addBotLog(`❌ Falha ao enviar ordem: ${err}`, 'error');
       } finally {
           setTradeLoading(false);
       }
@@ -408,16 +555,17 @@ export function DashboardView() {
   const handleScanMarket = async () => {
       setIsScanning(true);
       setMarketRanking([]);
+      addBotLog('🔍 Iniciando scan de mercado...', 'info');
       
-      const assetsToScan = AVAILABLE_ASSETS.slice(0, 5); // Scan top 5 assets to save API limits
+      const assetsToScan = AVAILABLE_ASSETS.slice(0, 8);
       const results: AssetRanking[] = [];
 
       for (const asset of assetsToScan) {
           try {
-              const history = await derivApi.getHistory(asset.id, 60, 50); // M1 Candles
+              const history = await derivApi.getHistory(asset.id, 60, 50);
               if (history.length > 20) {
                   const analysis = analyzeMarket(history);
-                  if (analysis.direction !== 'NEUTRO') {
+                  if (analysis.direction !== 'NEUTRO' && analysis.probability >= autoSettings.minProbability) {
                       results.push({
                           id: asset.id,
                           name: asset.name,
@@ -432,6 +580,7 @@ export function DashboardView() {
       }
 
       setMarketRanking(results.sort((a,b) => b.probability - a.probability));
+      addBotLog(`✅ Scan completo: ${results.length} oportunidades encontradas`, 'success');
       setIsScanning(false);
   };
 
@@ -455,7 +604,7 @@ export function DashboardView() {
     const priceRange = (maxPrice - minPrice) || 0.0001;
     
     const width = 800; const height = 350; const padding = 40; 
-    const paddingRight = 65; // Margem para a etiqueta de preço
+    const paddingRight = 65;
     const usableHeight = height - (padding * 2);
     const usableWidth = width - paddingRight;
 
@@ -575,7 +724,7 @@ export function DashboardView() {
             </div>
           </Card>
 
-          {/* --- PAINEL DE ATIVIDADE AO VIVO (COM STATUS DINÂMICO) --- */}
+          {/* --- PAINEL DE ATIVIDADE AO VIVO --- */}
           {liveTrades.length > 0 && (
               <div className="h-[240px] bg-slate-900 border border-slate-800 rounded-lg overflow-hidden flex flex-col">
                   <div className="px-4 py-2 bg-slate-950 border-b border-slate-800 flex items-center gap-2">
@@ -596,7 +745,6 @@ export function DashboardView() {
                                 trade.status === 'WIN' ? "bg-green-950/20 border-green-500/20" : 
                                 "bg-red-950/20 border-red-500/20")}>
                                 
-                                {/* Info Principal */}
                                 <div className="flex items-center justify-between z-10 relative mb-1">
                                     <div className="flex items-center gap-3">
                                         <span className="text-slate-500 font-mono text-[10px]">{trade.time}</span>
@@ -606,7 +754,6 @@ export function DashboardView() {
                                         </div>
                                     </div>
                                     
-                                    {/* Status Real-time */}
                                     {trade.status === 'PENDING' && (
                                         <div className="flex items-center gap-2">
                                             <div className={cn("px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider animate-pulse flex items-center gap-1", 
@@ -665,7 +812,6 @@ export function DashboardView() {
                                     </div>
                                 </div>
                                 
-                                {/* Barra de Progresso */}
                                 {trade.status === 'PENDING' && (
                                     <div className="mt-2 h-1 w-full bg-slate-800 rounded-full overflow-hidden">
                                         <div 
@@ -738,32 +884,54 @@ export function DashboardView() {
                             </div>
                         </div>
                         <div className="flex-1 grid grid-rows-2 gap-3 mt-4">
-                            <Button disabled={cooldown > 0} className="h-full bg-green-600 hover:bg-green-500 text-xl font-black disabled:opacity-50" onClick={() => handleTrade('CALL')}>
-                                {cooldown > 0 ? `AGUARDE (${cooldown}s)` : 'CALL'}
+                            <Button disabled={cooldown > 0 || isManualLocked} className="h-full bg-green-600 hover:bg-green-500 text-xl font-black disabled:opacity-50" onClick={() => handleTrade('CALL')}>
+                                {cooldown > 0 ? `AGUARDE (${cooldown}s)` : isManualLocked ? 'LIMITE ATINGIDO' : 'CALL'}
                             </Button>
-                            <Button disabled={cooldown > 0} className="h-full bg-red-600 hover:bg-red-500 text-xl font-black disabled:opacity-50" onClick={() => handleTrade('PUT')}>
-                                {cooldown > 0 ? `AGUARDE (${cooldown}s)` : 'PUT'}
+                            <Button disabled={cooldown > 0 || isManualLocked} className="h-full bg-red-600 hover:bg-red-500 text-xl font-black disabled:opacity-50" onClick={() => handleTrade('PUT')}>
+                                {cooldown > 0 ? `AGUARDE (${cooldown}s)` : isManualLocked ? 'LIMITE ATINGIDO' : 'PUT'}
                             </Button>
                         </div>
                     </div>
                 )}
 
-                {/* --- MODO AUTO (BOT UI) --- */}
+                {/* --- MODO AUTO (BOT UI MELHORADO) --- */}
                 {executionMode === 'AUTO' && (
                     <div className="space-y-4 flex flex-col h-full">
-                       {/* BOT STATUS HEADER */}
+                       {/* BOT STATUS HEADER MELHORADO */}
                        <div className={cn(
                            "p-4 rounded-xl border flex items-center gap-3 shadow-lg",
                            isAutoRunning ? "bg-green-950/20 border-green-500/30" : "bg-slate-950 border-slate-800"
                        )}>
                            <div className={cn("p-2 rounded-full", isAutoRunning ? "bg-green-500/20 animate-pulse" : "bg-slate-800")}>
-                               <Bot className={cn("h-6 w-6", isAutoRunning ? "text-green-500" : "text-slate-500")} />
+                               <Brain className={cn("h-6 w-6", isAutoRunning ? "text-green-500" : "text-slate-500")} />
                            </div>
                            <div className="flex-1">
-                               <h4 className="font-bold text-white text-sm">Sniper Bot v1.0</h4>
+                               <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                                   Sniper Bot v2.0
+                                   {martingaleConfig.enabled && martingaleConfig.currentLevel > 0 && (
+                                       <span className="text-[9px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded font-black">
+                                           MARTINGALE x{Math.pow(martingaleConfig.multiplier, martingaleConfig.currentLevel).toFixed(1)}
+                                       </span>
+                                   )}
+                               </h4>
                                <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                                   Status: <span className={cn("font-bold uppercase", isAutoRunning ? 'text-green-400' : 'text-slate-500')}>{botStatus.replace('_', ' ')}</span>
+                                   Status: <span className={cn("font-bold uppercase", 
+                                       botStatus === 'RUNNING' ? 'text-green-400' : 
+                                       botStatus === 'ANALYZING' ? 'text-blue-400' :
+                                       botStatus === 'WAITING_COOLDOWN' ? 'text-yellow-400' :
+                                       'text-slate-500'
+                                   )}>{botStatus.replace('_', ' ')}</span>
                                </p>
+                               {botMetrics.consecutiveWins > 0 && (
+                                   <p className="text-[9px] text-green-500 flex items-center gap-1 mt-1">
+                                       <TrendUp className="h-3 w-3" /> {botMetrics.consecutiveWins} Vitórias Seguidas
+                                   </p>
+                               )}
+                               {botMetrics.consecutiveLosses > 0 && (
+                                   <p className="text-[9px] text-red-500 flex items-center gap-1 mt-1">
+                                       <TrendingDown className="h-3 w-3" /> {botMetrics.consecutiveLosses} Derrotas Seguidas
+                                   </p>
+                               )}
                            </div>
                        </div>
                        
@@ -781,23 +949,47 @@ export function DashboardView() {
                            >
                                <ShieldAlert className="h-3 w-3" /> RISCO
                            </button>
+                           <button 
+                             onClick={() => setBotTab('ADVANCED')}
+                             className={cn("flex-1 py-2 text-[10px] font-bold rounded transition-colors flex items-center justify-center gap-2", botTab === 'ADVANCED' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
+                           >
+                               <Lightning className="h-3 w-3" /> AVANÇADO
+                           </button>
                        </div>
 
-                       <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                       <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
                            {botTab === 'CONFIG' && (
                                <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
                                    <div className="space-y-2">
-                                       <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1"><DollarSign className="h-3 w-3" /> Stake (Valor da Entrada)</label>
-                                       <input type="number" value={autoSettings.stake} onChange={(e) => setAutoSettings({...autoSettings, stake: Number(e.target.value)})} className="w-full h-12 bg-slate-950 border border-slate-700 rounded-lg pl-4 text-white font-black text-lg focus:ring-2 focus:ring-yellow-500/50 outline-none" placeholder="10.00" />
+                                       <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1"><DollarSign className="h-3 w-3" /> Stake Base</label>
+                                       <input type="number" step="0.5" value={autoSettings.stake} onChange={(e) => setAutoSettings({...autoSettings, stake: Number(e.target.value)})} className="w-full h-12 bg-slate-950 border border-slate-700 rounded-lg pl-4 text-white font-black text-lg focus:ring-2 focus:ring-yellow-500/50 outline-none" />
                                    </div>
                                    
-                                   {/* --- CÉREBRO DO BOT (LOGS) --- */}
+                                   <div className="grid grid-cols-2 gap-3">
+                                       <div className="space-y-2">
+                                           <label className="text-[9px] font-bold text-slate-500 uppercase">Min. Probabilidade</label>
+                                           <input type="number" min="50" max="95" value={autoSettings.minProbability} onChange={(e) => setAutoSettings({...autoSettings, minProbability: Number(e.target.value)})} className="w-full h-10 bg-slate-950 border border-slate-700 rounded px-3 text-white font-bold text-sm focus:ring-2 focus:ring-yellow-500/50 outline-none" />
+                                       </div>
+                                       <div className="space-y-2">
+                                           <label className="text-[9px] font-bold text-slate-500 uppercase">Min. Score</label>
+                                           <input type="number" min="0" max="100" value={autoSettings.minScore} onChange={(e) => setAutoSettings({...autoSettings, minScore: Number(e.target.value)})} className="w-full h-10 bg-slate-950 border border-slate-700 rounded px-3 text-white font-bold text-sm focus:ring-2 focus:ring-yellow-500/50 outline-none" />
+                                       </div>
+                                   </div>
+                                   
+                                   <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-2">
+                                       <label className="flex items-center gap-2 cursor-pointer">
+                                           <input type="checkbox" checked={autoSettings.conservativeMode} onChange={(e) => setAutoSettings({...autoSettings, conservativeMode: e.target.checked})} className="rounded border-slate-700 bg-slate-900 text-green-500" />
+                                           <span className="text-[10px] font-bold text-slate-300">🛡️ Modo Conservador (85%+)</span>
+                                       </label>
+                                   </div>
+                                   
+                                   {/* --- LOG DE DECISÃO --- */}
                                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800">
-                                       <h5 className="text-[10px] font-bold text-slate-500 uppercase mb-2 flex items-center gap-2"><Zap className="h-3 w-3 text-yellow-500"/> Log de Decisão (Cérebro)</h5>
-                                       <div className="h-32 overflow-y-auto space-y-1 bg-slate-900/50 p-2 rounded text-[10px] font-mono border border-slate-800/50">
+                                       <h5 className="text-[10px] font-bold text-slate-500 uppercase mb-2 flex items-center gap-2"><Zap className="h-3 w-3 text-yellow-500"/> Cerebro do Bot (Logs)</h5>
+                                       <div className="h-40 overflow-y-auto space-y-1 bg-slate-900/50 p-2 rounded text-[10px] font-mono border border-slate-800/50 scrollbar-thin scrollbar-thumb-slate-700">
                                            {botLogs.length === 0 ? <span className="text-slate-600 italic">Bot aguardando início...</span> : 
                                              botLogs.map((log, i) => (
-                                                 <div key={i} className="text-slate-400 border-b border-slate-800/30 pb-0.5 mb-0.5 last:border-0">{log}</div>
+                                                 <div key={i} className="text-slate-300 border-b border-slate-800/30 pb-0.5 mb-0.5 last:border-0">{log}</div>
                                              ))
                                            }
                                        </div>
@@ -819,22 +1011,22 @@ export function DashboardView() {
                                            <div className="grid grid-cols-2 gap-3">
                                                <div>
                                                    <label className="text-[9px] text-slate-500 uppercase font-bold">Stop Win ($)</label>
-                                                   <input type="number" value={autoSettings.stopWinValue} onChange={(e) => setAutoSettings({...autoSettings, stopWinValue: Number(e.target.value)})} className="w-full bg-slate-900 border border-green-800/50 rounded h-9 px-2 text-green-400 font-mono text-sm font-bold mt-1" />
+                                                   <input type="number" step="1" value={autoSettings.stopWinValue} onChange={(e) => setAutoSettings({...autoSettings, stopWinValue: Number(e.target.value)})} className="w-full bg-slate-900 border border-green-800/50 rounded h-9 px-2 text-green-400 font-mono text-sm font-bold mt-1" />
                                                </div>
                                                <div>
                                                    <label className="text-[9px] text-slate-500 uppercase font-bold">Stop Loss ($)</label>
-                                                   <input type="number" value={autoSettings.stopLossValue} onChange={(e) => setAutoSettings({...autoSettings, stopLossValue: Number(e.target.value)})} className="w-full bg-slate-900 border border-red-800/50 rounded h-9 px-2 text-red-400 font-mono text-sm font-bold mt-1" />
+                                                   <input type="number" step="1" value={autoSettings.stopLossValue} onChange={(e) => setAutoSettings({...autoSettings, stopLossValue: Number(e.target.value)})} className="w-full bg-slate-900 border border-red-800/50 rounded h-9 px-2 text-red-400 font-mono text-sm font-bold mt-1" />
                                                </div>
                                            </div>
                                        ) : (
                                            <div className="grid grid-cols-2 gap-3">
                                                <div>
                                                    <label className="text-[9px] text-slate-500 uppercase font-bold">Meta Wins</label>
-                                                   <input type="number" value={autoSettings.stopWinCount} onChange={(e) => setAutoSettings({...autoSettings, stopWinCount: Number(e.target.value)})} className="w-full bg-slate-900 border border-green-800/50 rounded h-9 px-2 text-green-400 font-mono text-sm font-bold mt-1" />
+                                                   <input type="number" min="1" value={autoSettings.stopWinCount} onChange={(e) => setAutoSettings({...autoSettings, stopWinCount: Number(e.target.value)})} className="w-full bg-slate-900 border border-green-800/50 rounded h-9 px-2 text-green-400 font-mono text-sm font-bold mt-1" />
                                                </div>
                                                <div>
                                                    <label className="text-[9px] text-slate-500 uppercase font-bold">Max Loss</label>
-                                                   <input type="number" value={autoSettings.stopLossCount} onChange={(e) => setAutoSettings({...autoSettings, stopLossCount: Number(e.target.value)})} className="w-full bg-slate-900 border border-red-800/50 rounded h-9 px-2 text-red-400 font-mono text-sm font-bold mt-1" />
+                                                   <input type="number" min="1" value={autoSettings.stopLossCount} onChange={(e) => setAutoSettings({...autoSettings, stopLossCount: Number(e.target.value)})} className="w-full bg-slate-900 border border-red-800/50 rounded h-9 px-2 text-red-400 font-mono text-sm font-bold mt-1" />
                                                </div>
                                            </div>
                                        )}
@@ -843,7 +1035,7 @@ export function DashboardView() {
                                    <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-3">
                                        <div className="flex items-center gap-2">
                                           <input type="checkbox" checked={autoSettings.scheduleEnabled} onChange={(e) => setAutoSettings({...autoSettings, scheduleEnabled: e.target.checked})} className="rounded border-slate-700 bg-slate-900 text-green-500" />
-                                          <label className="text-[10px] font-bold text-slate-400 uppercase">Agendar Horário</label>
+                                          <label className="text-[10px] font-bold text-slate-400 uppercase">⏰ Agendar Horário</label>
                                        </div>
                                        {autoSettings.scheduleEnabled && (
                                            <div className="grid grid-cols-2 gap-2 mt-2">
@@ -866,13 +1058,76 @@ export function DashboardView() {
                                    </div>
                                </div>
                            )}
+
+                           {botTab === 'ADVANCED' && (
+                               <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                                   <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-3">
+                                       <h5 className="text-[10px] font-bold text-slate-400 uppercase border-b border-slate-800 pb-2">Cooldown & Limites</h5>
+                                       <div className="grid grid-cols-2 gap-3">
+                                           <div>
+                                               <label className="text-[9px] text-slate-500 uppercase font-bold">Cooldown (seg)</label>
+                                               <input type="number" min="0" max="300" value={autoSettings.tradeCooldownSeconds} onChange={(e) => setAutoSettings({...autoSettings, tradeCooldownSeconds: Number(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded h-9 px-2 text-white font-mono text-sm font-bold mt-1" />
+                                           </div>
+                                           <div>
+                                               <label className="text-[9px] text-slate-500 uppercase font-bold">Max/Hora</label>
+                                               <input type="number" min="1" max="60" value={autoSettings.maxTradesPerHour} onChange={(e) => setAutoSettings({...autoSettings, maxTradesPerHour: Number(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded h-9 px-2 text-white font-mono text-sm font-bold mt-1" />
+                                           </div>
+                                       </div>
+                                       <div className="text-[9px] text-slate-500 bg-slate-900 p-2 rounded">
+                                           Trades esta hora: <span className="text-white font-bold">{botMetrics.hourlyTrades}/{autoSettings.maxTradesPerHour}</span>
+                                       </div>
+                                   </div>
+                                   
+                                   {/* --- MARTINGALE (ALTO RISCO) --- */}
+                                   <div className="bg-gradient-to-br from-red-950/30 to-slate-950 p-3 rounded-lg border border-red-500/30 space-y-3">
+                                       <div className="flex items-center justify-between">
+                                           <div>
+                                               <h5 className="text-[10px] font-bold text-red-400 uppercase flex items-center gap-1">
+                                                   ⚠️ Martingale (Risco)
+                                               </h5>
+                                               <p className="text-[8px] text-slate-500 mt-0.5">Dobra stake após loss</p>
+                                           </div>
+                                           <label className="relative inline-flex items-center cursor-pointer">
+                                               <input type="checkbox" checked={martingaleConfig.enabled} onChange={(e) => setMartingaleConfig({...martingaleConfig, enabled: e.target.checked, currentLevel: 0})} className="sr-only peer" />
+                                               <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600"></div>
+                                           </label>
+                                       </div>
+                                       
+                                       {martingaleConfig.enabled && (
+                                           <div className="grid grid-cols-2 gap-2 animate-in fade-in duration-200">
+                                               <div>
+                                                   <label className="text-[8px] text-slate-500 uppercase font-bold">Multiplicador</label>
+                                                   <input type="number" min="1.5" max="3" step="0.1" value={martingaleConfig.multiplier} onChange={(e) => setMartingaleConfig({...martingaleConfig, multiplier: Number(e.target.value)})} className="w-full bg-slate-900 border border-red-800/50 rounded h-8 px-2 text-red-400 font-mono text-xs font-bold mt-1" />
+                                               </div>
+                                               <div>
+                                                   <label className="text-[8px] text-slate-500 uppercase font-bold">Nível Máx</label>
+                                                   <input type="number" min="1" max="5" value={martingaleConfig.maxLevel} onChange={(e) => setMartingaleConfig({...martingaleConfig, maxLevel: Number(e.target.value)})} className="w-full bg-slate-900 border border-red-800/50 rounded h-8 px-2 text-red-400 font-mono text-xs font-bold mt-1" />
+                                               </div>
+                                               <div className="col-span-2">
+                                                   <label className="flex items-center gap-2 cursor-pointer">
+                                                       <input type="checkbox" checked={martingaleConfig.resetOnWin} onChange={(e) => setMartingaleConfig({...martingaleConfig, resetOnWin: e.target.checked})} className="rounded border-slate-700 bg-slate-900 text-green-500" />
+                                                       <span className="text-[9px] text-slate-400">Resetar ao vencer</span>
+                                                   </label>
+                                               </div>
+                                           </div>
+                                       )}
+                                   </div>
+                               </div>
+                           )}
                        </div>
 
                        <Button 
                          onClick={() => setIsAutoRunning(!isAutoRunning)}
-                         className={cn("w-full font-black h-12 text-sm shadow-xl transition-all", isAutoRunning ? "bg-red-600 hover:bg-red-700 shadow-red-500/20" : "bg-green-600 hover:bg-green-700 shadow-green-500/20")}
+                         disabled={isAutoLocked()}
+                         className={cn("w-full font-black h-12 text-sm shadow-xl transition-all", 
+                             isAutoRunning ? "bg-red-600 hover:bg-red-700 shadow-red-500/20" : 
+                             isAutoLocked() ? "bg-slate-700 text-slate-500" :
+                             "bg-green-600 hover:bg-green-700 shadow-green-500/20"
+                         )}
                        >
-                           {isAutoRunning ? <><StopCircle className="mr-2 h-5 w-5" /> PARAR BOT</> : <><Play className="mr-2 h-5 w-5" /> INICIAR AUTO</>}
+                           {isAutoRunning ? <><StopCircle className="mr-2 h-5 w-5" /> PARAR BOT</> : 
+                            isAutoLocked() ? '🛑 STOP ATINGIDO' :
+                            <><Play className="mr-2 h-5 w-5" /> INICIAR AUTO</>}
                        </Button>
                     </div>
                 )}
@@ -882,6 +1137,7 @@ export function DashboardView() {
                     <div className="flex-1 flex flex-col gap-4">
                         <div className="text-center py-2 bg-slate-950 rounded border border-slate-800">
                              <h4 className="text-xs font-bold text-slate-400 uppercase">Scanner de Oportunidades</h4>
+                             <p className="text-[10px] text-slate-600 mt-1">Filtro: Prob ≥ {autoSettings.minProbability}%</p>
                         </div>
                         
                         {isScanning ? (
@@ -890,16 +1146,19 @@ export function DashboardView() {
                                 <span className="text-xs animate-pulse">Analisando mercados...</span>
                             </div>
                         ) : marketRanking.length > 0 ? (
-                            <div className="flex-1 overflow-y-auto space-y-2">
+                            <div className="flex-1 overflow-y-auto space-y-2 scrollbar-thin scrollbar-thumb-slate-800">
                                 {marketRanking.map((rank, i) => (
-                                    <div key={rank.id} onClick={() => setActiveAsset(AVAILABLE_ASSETS.find(a=>a.id===rank.id)!)} className="bg-slate-950 p-3 rounded-lg border border-slate-800 hover:border-purple-500 cursor-pointer transition-all">
+                                    <div key={rank.id} onClick={() => {
+                                        setActiveAsset(AVAILABLE_ASSETS.find(a=>a.id===rank.id)!);
+                                        setExecutionMode('AUTO');
+                                    }} className="bg-slate-950 p-3 rounded-lg border border-slate-800 hover:border-purple-500 cursor-pointer transition-all">
                                         <div className="flex justify-between items-center mb-1">
                                             <span className="text-xs font-bold text-white">{rank.name}</span>
                                             <span className={cn("text-[10px] font-black px-1.5 py-0.5 rounded", rank.direction === 'CALL' ? "bg-green-500 text-slate-900" : "bg-red-500 text-white")}>{rank.direction}</span>
                                         </div>
                                         <div className="flex justify-between items-center text-[10px] text-slate-500">
-                                            <span>Probabilidade: <b className="text-white">{rank.probability}%</b></span>
-                                            <span>Score: {rank.score}</span>
+                                            <span>Prob: <b className="text-white">{rank.probability}%</b></span>
+                                            <span>Score: <b className="text-white">{rank.score}</b></span>
                                         </div>
                                     </div>
                                 ))}
