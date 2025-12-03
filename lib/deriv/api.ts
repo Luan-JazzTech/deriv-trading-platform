@@ -190,7 +190,7 @@ export class DerivAPI {
       });
     }
   
-    async buyContract(symbol: string, contractType: 'CALL' | 'PUT', stake: number, duration: number, durationUnit: 't' | 'm') {
+    async buyContract(symbol: string, contractType: 'CALL' | 'PUT', stake: number, duration: number, durationUnit: 't' | 'm' | 's' | 'h' | 'd') {
       const payload = {
         buy: 1,
         price: stake,
