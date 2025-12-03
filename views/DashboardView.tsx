@@ -34,6 +34,29 @@ interface AssetRanking {
     score: number;
 }
 
+// NOVO: Interface para monitoramento em tempo real
+interface AssetMonitor {
+    id: string;
+    name: string;
+    status: 'ANALYZING' | 'APPROVED' | 'REJECTED' | 'COOLDOWN' | 'OPERATING';
+    direction?: 'CALL' | 'PUT' | 'NEUTRO';
+    probability?: number;
+    score?: number;
+    rejectReason?: string;
+    lastAnalysis: number; // timestamp
+    cooldownEnds?: number; // timestamp
+}
+
+interface DecisionLog {
+    timestamp: number;
+    asset: string;
+    decision: 'APPROVED' | 'REJECTED' | 'COOLDOWN';
+    direction?: 'CALL' | 'PUT';
+    reason: string;
+    probability?: number;
+    score?: number;
+}
+
 interface TradeActivity {
     id: number;
     asset: string;
@@ -103,7 +126,7 @@ export function DashboardView() {
   // --- CONFIGURAÇÃO BOT MELHORADA ---
   const [isAutoRunning, setIsAutoRunning] = useState(false);
   const [botStatus, setBotStatus] = useState<'IDLE' | 'RUNNING' | 'WAITING_SCHEDULE' | 'STOPPED_BY_RISK' | 'WAITING_COOLDOWN' | 'ANALYZING'>('IDLE');
-  const [botTab, setBotTab] = useState<'CONFIG' | 'RISK' | 'ADVANCED'>('CONFIG');
+  const [botTab, setBotTab] = useState<'CONFIG' | 'RISK' | 'ADVANCED' | 'MONITOR'>('CONFIG');
   const [botLogs, setBotLogs] = useState<string[]>([]);
 
   const [stopMode, setStopMode] = useState<'FINANCIAL' | 'QUANTITY'>('FINANCIAL');
@@ -155,6 +178,16 @@ export function DashboardView() {
   const [marketRanking, setMarketRanking] = useState<AssetRanking[]>([]);
   const [isScanning, setIsScanning] = useState(false);
 
+  // --- MONITOR EM TEMPO REAL ---
+  const [assetMonitors, setAssetMonitors] = useState<Map<string, AssetMonitor>>(new Map());
+  const [decisionLogs, setDecisionLogs] = useState<DecisionLog[]>([]);
+  const [monitorStats, setMonitorStats] = useState({
+      analyzed: 0,
+      approved: 0,
+      rejected: 0,
+      lastMinuteAnalyzed: 0
+  });
+
   // Configuração Global Manual
   const RISK_CONFIG = { maxTrades: 20, stopWin: 100.00, stopLoss: -50.00 };
   const isManualLocked = dailyStats.trades >= RISK_CONFIG.maxTrades;
@@ -173,6 +206,28 @@ export function DashboardView() {
   const addBotLog = (msg: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
       const icon = type === 'success' ? '✅' : type === 'warning' ? '⚠️' : type === 'error' ? '❌' : 'ℹ️';
       setBotLogs(prev => [`${icon} [${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 100));
+  };
+
+  // NOVO: Registrar decisão do bot no monitor
+  const logDecision = (asset: string, decision: 'APPROVED' | 'REJECTED' | 'COOLDOWN', reason: string, analysis?: AnalysisResult) => {
+      const log: DecisionLog = {
+          timestamp: Date.now(),
+          asset,
+          decision,
+          reason,
+          direction: analysis?.direction !== 'NEUTRO' ? analysis?.direction : undefined,
+          probability: analysis?.probability,
+          score: analysis?.score
+      };
+      
+      setDecisionLogs(prev => [log, ...prev].slice(0, 50)); // Mantém últimas 50 decisões
+      
+      setMonitorStats(prev => ({
+          ...prev,
+          analyzed: prev.analyzed + 1,
+          approved: prev.approved + (decision === 'APPROVED' ? 1 : 0),
+          rejected: prev.rejected + (decision === 'REJECTED' ? 1 : 0)
+      }));
   };
   
   // --- TIMER GLOBAL PARA UI DE PROGRESSO ---
@@ -356,24 +411,32 @@ export function DashboardView() {
 
           // Filtro de probabilidade mínima
           if (analysis.probability < autoSettings.minProbability) {
-              addBotLog(`⏭️ Sinal ignorado: Probabilidade ${analysis.probability}% < ${autoSettings.minProbability}% (mínimo)`, 'info');
+              const reason = `Probabilidade ${analysis.probability}% < ${autoSettings.minProbability}% (mínimo)`;
+              logDecision(activeAsset.name, 'REJECTED', reason, analysis);
+              addBotLog(`⏭️ Sinal ignorado: ${reason}`, 'info');
               return;
           }
           
           // Filtro de score mínimo
           if (analysis.score < autoSettings.minScore) {
-              addBotLog(`⏭️ Sinal ignorado: Score ${analysis.score} < ${autoSettings.minScore} (mínimo)`, 'info');
+              const reason = `Score ${analysis.score} < ${autoSettings.minScore} (mínimo)`;
+              logDecision(activeAsset.name, 'REJECTED', reason, analysis);
+              addBotLog(`⏭️ Sinal ignorado: ${reason}`, 'info');
               return;
           }
           
           // Modo conservador: exige confluência máxima
           if (autoSettings.conservativeMode && analysis.probability < 85) {
-              addBotLog(`🛡️ Modo Conservador: Sinal ${analysis.probability}% não atinge 85% requerido`, 'info');
+              const reason = `Modo Conservador: ${analysis.probability}% < 85% requerido`;
+              logDecision(activeAsset.name, 'REJECTED', reason, analysis);
+              addBotLog(`🛡️ ${reason}`, 'info');
               return;
           }
 
           // Verificar se deve evitar após losses consecutivas
           if (botMetrics.consecutiveLosses >= 3 && !martingaleConfig.enabled) {
+              const reason = '3 losses consecutivas - Pausando';
+              logDecision(activeAsset.name, 'REJECTED', reason, analysis);
               addBotLog(`⚠️ PAUSANDO: 3 losses consecutivas. Aguardando mercado estabilizar...`, 'warning');
               setCooldown(120); // 2 minutos de pausa
               return;
@@ -400,6 +463,8 @@ export function DashboardView() {
                   }
               }
               
+              const reason = `Sinal APROVADO - Prob: ${analysis.probability}%, Score: ${analysis.score}`;
+              logDecision(activeAsset.name, 'APPROVED', reason, analysis);
               addBotLog(`🎯 EXECUTANDO ${analysis.direction} | Prob: ${analysis.probability}% | Score: ${analysis.score} | Stake: ${formatCurrency(tradeStake)}`, 'success');
               handleTrade(analysis.direction, tradeStake);
               lastAutoTradeTimestamp.current = analysis.timestamp;
@@ -487,6 +552,13 @@ export function DashboardView() {
                       const profit = Number(update.profit);
                       const status = profit >= 0 ? 'WIN' : 'LOSS';
                       
+                      console.log(`🎯 TRADE FINALIZADO: ID ${contractInfo.contract_id}`, {
+                          status,
+                          profit,
+                          exitPrice: update.exit_tick,
+                          entryPrice: updatedTrade.entryPrice
+                      });
+                      
                       // Atualizar isWinning baseado no resultado REAL
                       updatedTrade.isWinning = status === 'WIN';
                       
@@ -500,6 +572,7 @@ export function DashboardView() {
                       }
                       
                       if (t.status === 'PENDING') {
+                         console.log(`📊 Atualizando dailyStats: +${profit}`);
                          setDailyStats(stats => ({
                              trades: stats.trades + 1,
                              wins: stats.wins + (profit >= 0 ? 1 : 0),
@@ -549,6 +622,10 @@ export function DashboardView() {
                              if(res.error) console.error("Erro log Supabase:", res.error);
                          });
                       }
+
+                      // CRÍTICO: Desinscrever do WebSocket após finalizar
+                      console.log(`🔌 Unsubscribe do contrato ${contractInfo.contract_id}`);
+                      derivApi.unsubscribeContract(contractInfo.contract_id);
 
                       return { 
                           ...updatedTrade, 
@@ -1016,24 +1093,30 @@ export function DashboardView() {
                        </div>
                        
                        {/* SETTINGS TABS */}
-                       <div className="flex gap-2 p-1 bg-slate-950 rounded-lg border border-slate-800">
+                       <div className="flex gap-1 p-1 bg-slate-950 rounded-lg border border-slate-800">
                            <button 
                              onClick={() => setBotTab('CONFIG')}
-                             className={cn("flex-1 py-2 text-[10px] font-bold rounded transition-colors flex items-center justify-center gap-2", botTab === 'CONFIG' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
+                             className={cn("flex-1 py-2 text-[9px] font-bold rounded transition-colors flex items-center justify-center gap-1", botTab === 'CONFIG' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
                            >
                                <Settings2 className="h-3 w-3" /> ESTRATÉGIA
                            </button>
                            <button 
                              onClick={() => setBotTab('RISK')}
-                             className={cn("flex-1 py-2 text-[10px] font-bold rounded transition-colors flex items-center justify-center gap-2", botTab === 'RISK' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
+                             className={cn("flex-1 py-2 text-[9px] font-bold rounded transition-colors flex items-center justify-center gap-1", botTab === 'RISK' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
                            >
                                <ShieldAlert className="h-3 w-3" /> RISCO
                            </button>
                            <button 
                              onClick={() => setBotTab('ADVANCED')}
-                             className={cn("flex-1 py-2 text-[10px] font-bold rounded transition-colors flex items-center justify-center gap-2", botTab === 'ADVANCED' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
+                             className={cn("flex-1 py-2 text-[9px] font-bold rounded transition-colors flex items-center justify-center gap-1", botTab === 'ADVANCED' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
                            >
                                <Lightning className="h-3 w-3" /> AVANÇADO
+                           </button>
+                           <button 
+                             onClick={() => setBotTab('MONITOR')}
+                             className={cn("flex-1 py-2 text-[9px] font-bold rounded transition-colors flex items-center justify-center gap-1", botTab === 'MONITOR' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300")}
+                           >
+                               <Activity className="h-3 w-3" /> MONITOR
                            </button>
                        </div>
 
@@ -1192,6 +1275,136 @@ export function DashboardView() {
                                            </div>
                                        )}
                                    </div>
+                               </div>
+                           )}
+
+                           {/* --- ABA MONITOR (NOVA!) --- */}
+                           {botTab === 'MONITOR' && (
+                               <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                                   {!isAutoRunning ? (
+                                       <div className="text-center py-8 text-slate-500">
+                                           <Activity className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                                           <p className="text-sm">Inicie o bot para ver o monitor em tempo real</p>
+                                       </div>
+                                   ) : (
+                                       <>
+                                           {/* STATUS ATUAL */}
+                                           <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                                               <h5 className="text-[10px] font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
+                                                   <Target className="h-3 w-3 text-green-500 animate-pulse" /> Ativo Atual
+                                               </h5>
+                                               <div className="flex items-center justify-between">
+                                                   <div className="flex items-center gap-2">
+                                                       {getAssetIcon(activeAsset.type)}
+                                                       <span className="text-white font-bold">{activeAsset.name}</span>
+                                                   </div>
+                                                   {analysis && (
+                                                       <div className={cn("px-2 py-1 rounded text-[9px] font-black", 
+                                                           analysis.isSniperReady && analysis.direction !== 'NEUTRO' 
+                                                               ? (analysis.direction === 'CALL' ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400")
+                                                               : "bg-slate-800 text-slate-400"
+                                                       )}>
+                                                           {analysis.isSniperReady ? (analysis.direction === 'CALL' ? '🚀 CALL' : analysis.direction === 'PUT' ? '📉 PUT' : '⏸️ NEUTRO') : '🔍 ANALISANDO'}
+                                                       </div>
+                                                   )}
+                                               </div>
+                                               {analysis && analysis.isSniperReady && analysis.direction !== 'NEUTRO' && (
+                                                   <div className="mt-2 flex gap-2 text-[9px]">
+                                                       <span className="text-slate-500">Prob: <b className="text-white">{analysis.probability}%</b></span>
+                                                       <span className="text-slate-500">Score: <b className="text-white">{analysis.score}</b></span>
+                                                   </div>
+                                               )}
+                                           </div>
+
+                                           {/* ESTATÍSTICAS */}
+                                           <div className="grid grid-cols-3 gap-2">
+                                               <div className="bg-slate-950 p-2 rounded border border-slate-800 text-center">
+                                                   <div className="text-[9px] text-slate-500 uppercase font-bold">Analisados</div>
+                                                   <div className="text-lg font-black text-white">{monitorStats.analyzed}</div>
+                                               </div>
+                                               <div className="bg-green-950/20 p-2 rounded border border-green-500/30 text-center">
+                                                   <div className="text-[9px] text-green-400 uppercase font-bold">Aprovados</div>
+                                                   <div className="text-lg font-black text-green-400">{monitorStats.approved}</div>
+                                               </div>
+                                               <div className="bg-red-950/20 p-2 rounded border border-red-500/30 text-center">
+                                                   <div className="text-[9px] text-red-400 uppercase font-bold">Rejeitados</div>
+                                                   <div className="text-lg font-black text-red-400">{monitorStats.rejected}</div>
+                                               </div>
+                                           </div>
+
+                                           {/* TAXA DE ENTRADA */}
+                                           <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                                               <div className="flex justify-between items-center mb-2">
+                                                   <span className="text-[10px] font-bold text-slate-400 uppercase">Taxa de Entrada</span>
+                                                   <span className="text-sm font-black text-white">
+                                                       {monitorStats.analyzed > 0 ? ((monitorStats.approved / monitorStats.analyzed) * 100).toFixed(1) : 0}%
+                                                   </span>
+                                               </div>
+                                               <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+                                                   <div 
+                                                       className="h-full bg-gradient-to-r from-green-500 to-green-400 transition-all duration-500"
+                                                       style={{ width: `${monitorStats.analyzed > 0 ? (monitorStats.approved / monitorStats.analyzed) * 100 : 0}%` }}
+                                                   />
+                                               </div>
+                                           </div>
+
+                                           {/* HISTÓRICO DE DECISÕES */}
+                                           <div className="bg-slate-950 rounded-lg border border-slate-800">
+                                               <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
+                                                   <h5 className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-2">
+                                                       <Clock className="h-3 w-3" /> Decisões Recentes
+                                                   </h5>
+                                                   <span className="text-[9px] text-slate-600">{decisionLogs.length} logs</span>
+                                               </div>
+                                               <div className="max-h-[300px] overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-slate-800">
+                                                   {decisionLogs.length === 0 ? (
+                                                       <div className="text-center py-4 text-slate-600 text-[10px]">
+                                                           Aguardando análises...
+                                                       </div>
+                                                   ) : (
+                                                       decisionLogs.map((log, i) => (
+                                                           <div key={i} className={cn("p-2 rounded text-[10px] border", 
+                                                               log.decision === 'APPROVED' ? "bg-green-950/10 border-green-500/20" :
+                                                               log.decision === 'COOLDOWN' ? "bg-yellow-950/10 border-yellow-500/20" :
+                                                               "bg-red-950/10 border-red-500/20"
+                                                           )}>
+                                                               <div className="flex justify-between items-start mb-1">
+                                                                   <span className="font-bold text-white">{log.asset}</span>
+                                                                   <span className="text-slate-500 font-mono text-[8px]">
+                                                                       {new Date(log.timestamp).toLocaleTimeString()}
+                                                                   </span>
+                                                               </div>
+                                                               <div className="flex items-center gap-2">
+                                                                   <span className={cn("px-1.5 py-0.5 rounded text-[8px] font-black uppercase",
+                                                                       log.decision === 'APPROVED' ? "bg-green-500/30 text-green-300" :
+                                                                       log.decision === 'COOLDOWN' ? "bg-yellow-500/30 text-yellow-300" :
+                                                                       "bg-red-500/30 text-red-300"
+                                                                   )}>
+                                                                       {log.decision === 'APPROVED' ? '✅ OPEROU' : 
+                                                                        log.decision === 'COOLDOWN' ? '⏳ COOLDOWN' : '❌ REJEITADO'}
+                                                                   </span>
+                                                                   {log.direction && log.direction !== 'NEUTRO' && (
+                                                                       <span className={cn("px-1.5 py-0.5 rounded text-[8px] font-bold",
+                                                                           log.direction === 'CALL' ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                                                                       )}>
+                                                                           {log.direction}
+                                                                       </span>
+                                                                   )}
+                                                               </div>
+                                                               <p className="text-slate-400 text-[9px] mt-1 leading-relaxed">{log.reason}</p>
+                                                               {log.probability && log.score && (
+                                                                   <div className="flex gap-2 mt-1 text-[8px] text-slate-600">
+                                                                       <span>Prob: {log.probability}%</span>
+                                                                       <span>Score: {log.score}</span>
+                                                                   </div>
+                                                               )}
+                                                           </div>
+                                                       ))
+                                                   )}
+                                               </div>
+                                           </div>
+                                       </>
+                                   )}
                                </div>
                            )}
                        </div>
